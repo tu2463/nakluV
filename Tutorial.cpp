@@ -54,7 +54,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	assert(render_params.image_index < swapchain_framebuffers.size());
 
 	//get more convenient names for the current workspace and target framebuffer:
-	Workspace &workspace = workspaces[render_params.workspace_index];
+	Workspace &workspace = workspaces[render_params.workspace_index]; // sets of data used for rendering an individual image; swapchain images are the places where rendering results eventually get stored
 	VkFramebuffer framebuffer = swapchain_framebuffers[render_params.image_index];
 
 	//record (into `workspace.command_buffer`) commands that run a `render_pass` that just clears `framebuffer`:

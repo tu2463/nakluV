@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
 		}
 
 		//loads vulkan library, creates surface, initializes helpers:
-		RTG rtg(configuration);
+		RTG rtg(configuration); // Creates an RTG object named rtg; Passes configuration as a parameter to the constructor
 
 		//initializes global (whole-life-of-application) resources:
 		Tutorial application(rtg);
