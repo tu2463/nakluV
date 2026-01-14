@@ -55,11 +55,47 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 	//get more convenient names for the current workspace and target framebuffer:
 	Workspace &workspace = workspaces[render_params.workspace_index]; // sets of data used for rendering an individual image; swapchain images are the places where rendering results eventually get stored
-	VkFramebuffer framebuffer = swapchain_framebuffers[render_params.image_index];
+	[[maybe_unused]] VkFramebuffer framebuffer = swapchain_framebuffers[render_params.image_index];
 
-	//record (into `workspace.command_buffer`) commands that run a `render_pass` that just clears `framebuffer`:
-	refsol::Tutorial_render_record_blank_frame(rtg, render_pass, framebuffer, &workspace.command_buffer);
+	// // record (into `workspace.command_buffer`) commands that run a `render_pass` that just clears `framebuffer`:
+	// refsol::Tutorial_render_record_blank_frame(rtg, render_pass, framebuffer, &workspace.command_buffer);
 
+	VK( vkResetCommandBuffer(workspace.command_buffer, 0) ); // reset the command buffer (clear old commands)
+	{ // begin recording
+		VkCommandBufferBeginInfo begin_info{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, //will record again every submit
+		};
+		VK( vkBeginCommandBuffer(workspace.command_buffer, &begin_info));
+	}
+	//TODO: put GPU commands here
+	//render pass:
+	std::array< VkClearValue, 2 > clear_values{
+		VkClearValue{ .color{ .float32{ 0.54, 0.35, 0.80, 1.0f } } },
+		VkClearValue{ .depthStencil{ .depth = 1.0f, .stencil = 0 } },
+	};
+
+	VkRenderPassBeginInfo begin_info{
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, 
+		.renderPass = render_pass,
+		.framebuffer = framebuffer,
+		.renderArea{
+			.offset = {.x = 0, .y = 0},
+			.extent = rtg.swapchain_extent,
+		},
+		.clearValueCount = uint32_t(clear_values.size()),
+		.pClearValues = clear_values.data(),
+	};
+	
+	vkCmdBeginRenderPass(workspace.command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+	//TODO: run pipelines here
+
+	vkCmdEndRenderPass(workspace.command_buffer);
+
+	//end recording:
+	VK( vkEndCommandBuffer(workspace.command_buffer ));
+	
 	//submit `workspace.command buffer` for the GPU to run:
 	refsol::Tutorial_render_submit(rtg, render_params, workspace.command_buffer);
 }
