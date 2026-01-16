@@ -12,6 +12,8 @@
 Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
 
+	background_pipeline.create(rtg, render_pass, 0);
+
 	workspaces.resize(rtg.workspaces.size());
 	for (Workspace &workspace : workspaces) {
 		refsol::Tutorial_constructor_workspace(rtg, command_pool, &workspace.command_buffer);
@@ -33,6 +35,8 @@ Tutorial::~Tutorial() {
 		refsol::Tutorial_destructor_workspace(rtg, command_pool, &workspace.command_buffer);
 	}
 	workspaces.clear();
+
+	background_pipeline.destroy(rtg);
 
 	refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
 }
@@ -89,7 +93,30 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	
 	vkCmdBeginRenderPass(workspace.command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	//TODO: run pipelines here
+	// TODO: run pipelines here
+	{ // set scissor rectangle:
+		VkRect2D scissor{
+			.offset = {.x = 0, .y = 0},
+			.extent = rtg.swapchain_extent,
+		};
+		vkCmdSetScissor(workspace.command_buffer, 0, 1, &scissor);
+	}
+	{ // configure viewport transform:
+		VkViewport viewport{
+			.x = 0.0f,
+			.y = 0.0f,
+			.width = float(rtg.swapchain_extent.width),
+			.height = float(rtg.swapchain_extent.height),
+			.minDepth = 0.0f,
+			.maxDepth = 1.0f,
+		};
+		vkCmdSetViewport(workspace.command_buffer, 0, 1, &viewport);
+	}
+
+	{ // draw with the background pipeline:
+		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, background_pipeline.handle);
+		vkCmdDraw(workspace.command_buffer, 3, 1, 0, 0);
+	}
 
 	vkCmdEndRenderPass(workspace.command_buffer);
 
