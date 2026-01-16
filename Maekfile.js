@@ -38,8 +38,8 @@ const main_objs = [
 
 //uncomment to build background shaders and pipeline:
 const background_shaders = [
-	// maek.GLSLC('background.vert'),
-	// maek.GLSLC('background.frag'),
+	maek.GLSLC('background.vert'),
+	maek.GLSLC('background.frag'),
 ];
 main_objs.push( maek.CPP('Tutorial-BackgroundPipeline.cpp', undefined, { depends:[...background_shaders] } ) );
 
