@@ -2,6 +2,9 @@
 
 layout(location = 0) out vec4 outColor;
 layout(location = 0) in vec2 position;
+layout(push_constant) uniform Push {
+    float time;
+}
 
 vec2 brickTile(vec2 _st, float _zoom) {
     _st *= _zoom;
@@ -32,9 +35,11 @@ void main() {
     vec3 mortarColor = vec3(0.2, 0.15, 0.05);
     vec3 color = mix(mortarColor, gradient, boxMask);
 
-    // outColor = vec4(color,1.0);
+    // -- outColor options: --
 
-    outColor = vec4(position, 0.0, 1.0);
+    // outColor = vec4(color,1.0); // brick pattern
 
-    // code example in tutorial: outColor = vec4( fract(gl_FragCoord.x / 100), gl_FragCoord.y / 400, 0.2, 1.0);
+    outColor = vec4(position, 0.0, 1.0); // resize
+
+    // outColor = vec4( fract(gl_FragCoord.x / 100), gl_FragCoord.y / 400, 0.2, 1.0); // basic gradient columns from tutorial
 }

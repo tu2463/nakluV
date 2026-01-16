@@ -129,6 +129,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 
 void Tutorial::update(float dt) {
+	time += dt;
 }
 
 
