@@ -1,6 +1,7 @@
 #version 450
 
 layout(location = 0) out vec4 outColor;
+layout(location = 0) in vec2 position;
 
 vec2 brickTile(vec2 _st, float _zoom) {
     _st *= _zoom;
@@ -31,7 +32,9 @@ void main() {
     vec3 mortarColor = vec3(0.2, 0.15, 0.05);
     vec3 color = mix(mortarColor, gradient, boxMask);
 
-    outColor = vec4(color,1.0);
+    // outColor = vec4(color,1.0);
+
+    outColor = vec4(position, 0.0, 1.0);
 
     // code example in tutorial: outColor = vec4( fract(gl_FragCoord.x / 100), gl_FragCoord.y / 400, 0.2, 1.0);
 }
