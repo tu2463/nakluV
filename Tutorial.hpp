@@ -23,7 +23,10 @@ struct Tutorial : RTG::Application {
 	struct BackgroundPipeline {
 		// no descriptor set layouts
 
-		// no push constants
+		// push constants
+		struct Push {
+			float time;
+		};
 
 		VkPipelineLayout layout = VK_NULL_HANDLE;
 		 // no vertex bindings

@@ -20,12 +20,6 @@ void main() {
     float amplitude = 0.6;     // Height of the wave
     float speed = 0.6;
 
-    float frequency1 = 1.5;
-    float frequency2 = 1.5;
-
-    float amplitude1 = 0.6;
-    float amplitude2 = 0.6;
-
     float speed1 = 0.3 + rand(gl_FragCoord.xy) * 0.6;
     float speed2 = 0.3 + rand(gl_FragCoord.xy) * 0.6;
     
@@ -48,9 +42,8 @@ void main() {
     } else {
         //wave1 = wave1_y + sin((uv.x + (time - t1) * speed1) * frequency * 3.14159) * amplitude;
         //wave2 = wave2_y - sin(pos_offset + (uv.x + (time - t1) * speed2) * frequency * 3.14159) * amplitude;
-        //wave1 = wave1_y + sin((uv.x + (time - t1) * ( speed + ( 0.01 - min(t1 - time, 0) ) )) * frequency1 * 3.14159) * amplitude1;
-        wave1 = wave1_y - sin(pos_offset + (uv.x + (time - t1) * (speed + ds1)) * frequency1 * 3.14159) * amplitude1;
-        wave2 = wave2_y - sin(pos_offset + (uv.x + (time - t1) * (speed + ds2)) * frequency2 * 3.14159) * amplitude2;
+        wave1 = wave1_y + sin((uv.x + (time - t1) * (speed + ds1)) * frequency * 3.14159) * amplitude;
+        wave2 = wave2_y - sin(pos_offset + (uv.x + (time - t1) * (speed + ds2)) * frequency * 3.14159) * amplitude;
     }
     
     // Calculate distance from current pixel to each wave
@@ -66,9 +59,9 @@ void main() {
     float lines = max(line1, line2);
     
     // Color the waves (cyan/blue gradient)
-    vec3 waveColor1 = vec3(0.2, 0.8, 1.0);  // Cyan for top wave
-    vec3 waveColor2 = vec3(0.4, 0.6, 1.0);  // light blue for bottom wave
-    vec3 backgroundColor = vec3(0.025, 0.025, 0.05);  // Dark background
+    vec3 waveColor1 = vec3(0.2, 0.8, 1.0) * 1.6;  // Cyan for top wave
+    vec3 waveColor2 = vec3(0.4, 0.6, 1.0) * 1.6;  // light blue for bottom wave
+    vec3 backgroundColor = vec3(0.025, 0.025, 0.05) * 0.75;  // Dark background
     
     // Mix colors based on which line is visible
     vec3 color = backgroundColor;

@@ -115,9 +115,16 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 	{ // draw with the background pipeline:
 		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, background_pipeline.handle);
+		
+		{ // push time:
+			BackgroundPipeline::Push push{
+				.time = time,
+			};
+			vkCmdPushConstants(workspace.command_buffer, background_pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+		}
+		
 		vkCmdDraw(workspace.command_buffer, 3, 1, 0, 0);
 	}
-
 	vkCmdEndRenderPass(workspace.command_buffer);
 
 	//end recording:
