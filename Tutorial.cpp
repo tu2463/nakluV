@@ -13,6 +13,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
 
 	background_pipeline.create(rtg, render_pass, 0);
+	lines_pipeline.create(rtg, render_pass, 0);
 
 	workspaces.resize(rtg.workspaces.size());
 	for (Workspace &workspace : workspaces) {
@@ -37,6 +38,7 @@ Tutorial::~Tutorial() {
 	workspaces.clear();
 
 	background_pipeline.destroy(rtg);
+	lines_pipeline.destroy(rtg);
 
 	refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
 }

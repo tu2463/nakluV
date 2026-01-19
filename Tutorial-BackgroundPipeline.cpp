@@ -156,5 +156,14 @@ void Tutorial::BackgroundPipeline::create(RTG &rtg, VkRenderPass render_pass, ui
 }
 
 void Tutorial::BackgroundPipeline::destroy(RTG &rtg) {
-	refsol::BackgroundPipeline_destroy(rtg, &layout, &handle);
+	// refsol::BackgroundPipeline_destroy(rtg, &layout, &handle);
+	if (layout != VK_NULL_HANDLE) {
+		vkDestroyPipelineLayout(rtg.device, layout, nullptr);
+		layout = VK_NULL_HANDLE;
+	}
+
+	if (handle != VK_NULL_HANDLE) {
+		vkDestroyPipeline(rtg.device, handle, nullptr);
+		handle = VK_NULL_HANDLE;
+	}
 }

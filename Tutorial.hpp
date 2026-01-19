@@ -37,6 +37,21 @@ struct Tutorial : RTG::Application {
 		void destroy(RTG &);
 	} background_pipeline;
 
+	struct LinesPipeline {
+		// no descriptor set layouts yet
+
+		// no push constants
+
+		VkPipelineLayout layout = VK_NULL_HANDLE;
+		
+		// no vertex bindings yet
+
+		VkPipeline handle = VK_NULL_HANDLE;
+
+		void create(RTG &, VkRenderPass render_pass, uint32_t subpass);
+		void destroy(RTG &);
+	} lines_pipeline; //?? what does the last line in this struct syntax mean?
+
 	//pools from which per-workspace things are allocated:
 	VkCommandPool command_pool = VK_NULL_HANDLE;
 
