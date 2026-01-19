@@ -86,6 +86,8 @@ struct Tutorial : RTG::Application {
 
 	float time = 0.0f;
 
+	std::vector< LinesPipeline::Vertex > lines_vertices;
+
 	//--------------------------------------------------------------------
 	//Rendering function, uses all the resources above to queue work to draw a frame:
 

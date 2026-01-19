@@ -138,7 +138,28 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 
 void Tutorial::update(float dt) {
-	time += dt;
+	time  = std::fmod(time + dt, 60.0f);
+
+	//make an 'x'
+	lines_vertices.clear();
+	lines_vertices.reserve(4);
+	lines_vertices.emplace_back(PosColVertex{
+		.Position{ .x = -1.0f, .y = -1.0f, .z = 0.0f },
+		.Color{ .r = 0xff, .g = 0xff, .b = 0xff, .a = 0xff }
+	});
+	lines_vertices.emplace_back(PosColVertex{
+		.Position{ .x = 1.0f, .y = 1.0f, .z = 0.0f },
+		.Color{ .r = 0xff, .g = 0x00, .b = 0x00, .a = 0xff }
+	});
+	lines_vertices.emplace_back(PosColVertex{
+		.Position{ .x = -1.0f, .y = 1.0f, .z = 0.0f },
+		.Color{ .r = 0x00, .g = 0x00, .b = 0xff, .a = 0xff }
+	});
+	lines_vertices.emplace_back(PosColVertex{
+		.Position{ .x = 1.0f, .y = -1.0f, .z = 0.0f },
+		.Color{ .r = 0x00, .g = 0x00, .b = 0xff, .a = 0xff }
+	});
+	assert(lines_vertices.size() == 4);
 }
 
 
