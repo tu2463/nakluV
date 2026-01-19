@@ -40,6 +40,7 @@ void main() {
 
     // outColor = vec4(color,1.0); // brick pattern
 
+    // Varying values are interpolated between vertices to their values at fragments using the barycentric coordinates of those fragments within their progenitor triangles. So even though we're just setting the out vec2 position varying value at the corners of the triangle, our fragments see a nice gradient of in vec2 position values.
     // outColor = vec4(position, 0.0, 1.0); // resize
 
     outColor = vec4(fract(position.x + time), position.y, 0.0, 1.0); // with time; code in tutorial 
