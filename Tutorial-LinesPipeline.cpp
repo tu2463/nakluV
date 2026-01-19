@@ -56,15 +56,6 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 			.pDynamicStates = dynamic_states.data(),
 		};
 
-		//this pipeline will take no per-vertex inputs:
-		VkPipelineVertexInputStateCreateInfo vertex_input_state{
-			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = 0,
-			.pVertexBindingDescriptions = nullptr, //?? when are these null ptrs set? what's the meaning of the 'p' in the attr name?
-			.vertexAttributeDescriptionCount = 0,
-			.pVertexAttributeDescriptions = nullptr,
-		};
-
 		//this pipeline will draw lines:
 		VkPipelineInputAssemblyStateCreateInfo input_assembly_state{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -128,7 +119,7 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 			.stageCount = uint32_t(stages.size()),
 			.pStages = stages.data(),
-			.pVertexInputState = &vertex_input_state,
+			.pVertexInputState = &Vertex::array_input_state,
 			.pInputAssemblyState = &input_assembly_state,
 			.pViewportState = &viewport_state,
 			.pRasterizationState = &rasterization_state,
