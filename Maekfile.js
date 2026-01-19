@@ -44,11 +44,11 @@ const background_shaders = [
 main_objs.push( maek.CPP('Tutorial-BackgroundPipeline.cpp', undefined, { depends:[...background_shaders] } ) );
 
 //uncomment to build lines shaders and pipeline:
-//const lines_shaders = [
-//	maek.GLSLC('lines.vert'),
-//	maek.GLSLC('lines.frag'),
-//];
-//main_objs.push( maek.CPP('Tutorial-LinesPipeline.cpp', undefined, { depends:[...lines_shaders] } ) );
+const lines_shaders = [
+	maek.GLSLC('lines.vert'),
+	maek.GLSLC('lines.frag'),
+];
+main_objs.push( maek.CPP('Tutorial-LinesPipeline.cpp', undefined, { depends:[...lines_shaders] } ) );
 
 //uncomment to build objects shaders and pipeline:
 //const objects_shaders = [
