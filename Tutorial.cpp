@@ -116,6 +116,20 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 		assert(workspace.lines_vertices_src.size == workspace.lines_vertices.size);
 		assert(workspace.lines_vertices_src.size >= needed_bytes);
+
+		// host-side copy into lines_vertices_src
+		// use the CPU to copy from the lines_vertices vector to the workspace.lines_vertices_src staging buffer
+		assert(workspace.lines_vertices_src.allocation.mapped);
+		std::memcpy(workspace.lines_vertices_src.allocation.data(), lines_vertices.data(), needed_bytes);
+
+		// device-side copy from lines_vertices_src -> lines_vertices:
+		// record a command to have the GPU copy the data from the staging buffer to the workspace.lines_vertices buffer.
+		VkBufferCopy copy_region{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = needed_bytes,
+		};
+		vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
 	}
 
 	// put GPU commands here
