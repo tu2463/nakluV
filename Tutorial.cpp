@@ -240,6 +240,20 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
 
+	{ // camera orbiting the origin:
+		float ang = float(M_PI) * 2.0f * 10.0f * (time / 60.0f);
+		CLIP_FROM_WORLD = perspective( // TODO: understand this
+			60.0f * float(M_PI) / 180.0f, //vfov
+			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
+			0.1f, //near
+			1000.0f //far
+		) * look_at(
+			3.0f * std::cos(ang), 3.0f * std::sin(ang), 1.0f, //eye
+			0.0f, 0.0f, 0.5f, //target
+			0.0f, 0.0f, 1.0f //up
+		);
+	}
+
 	{ // make some crossing lines at different depths:
 		lines_vertices.clear();
 		constexpr size_t count = 2 * 30 + 2 * 30; //?? what is constexpr?
@@ -270,6 +284,14 @@ void Tutorial::update(float dt) {
 			});
 		}
 		assert(lines_vertices.size() == count);
+	}
+
+	// HACK: transform vertices on the CPU(!)
+	for (PosColVertex &v : lines_vertices) {
+		vec4 res = CLIP_FROM_WORLD * vec4{v.Position.x, v.Position.y, v.Position.z, 1.0f};
+		v.Position.x = res[0] / res[3];
+		v.Position.y = res[1] / res[3];
+		v.Position.z = res[2] / res[3];
 	}
 }
 

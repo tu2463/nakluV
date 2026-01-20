@@ -1,6 +1,8 @@
 #pragma once
 
 #include "PosColVertex.hpp"
+#include "mat4.hpp"
+
 #include "RTG.hpp"
 
 struct Tutorial : RTG::Application {
@@ -88,6 +90,8 @@ struct Tutorial : RTG::Application {
 	virtual void on_input(InputEvent const &) override;
 
 	float time = 0.0f;
+
+	mat4 CLIP_FROM_WORLD;
 
 	std::vector< LinesPipeline::Vertex > lines_vertices;
 
