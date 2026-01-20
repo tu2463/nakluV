@@ -130,6 +130,24 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			.size = needed_bytes,
 		};
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
+
+		{ // memory barrier to make sure copies compelte before rendering happens
+			VkMemoryBarrier memory_barrier{
+				.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+				.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+				.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+			};
+
+			vkCmdPipelineBarrier(
+				workspace.command_buffer,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, // srcStageMask; ensures all transfer operations (like buffer copies) complete
+				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, // dstStageMask; wait for all transfer ops before vertex input reads the data
+				0, // dependencyFlags,
+				1, &memory_barrier, // memoryBarriers (count, data)
+				0, nullptr, // bufferMemoryBarriers (count, data)
+				0, nullptr // imageMemoryBarriers (count, data)
+			);
+		}
 	}
 
 	// put GPU commands here
