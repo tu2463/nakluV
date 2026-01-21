@@ -286,13 +286,13 @@ void Tutorial::update(float dt) {
 		assert(lines_vertices.size() == count);
 	}
 
-	// HACK: transform vertices on the CPU(!)
-	for (PosColVertex &v : lines_vertices) {
-		vec4 res = CLIP_FROM_WORLD * vec4{v.Position.x, v.Position.y, v.Position.z, 1.0f};
-		v.Position.x = res[0] / res[3];
-		v.Position.y = res[1] / res[3];
-		v.Position.z = res[2] / res[3];
-	}
+	// // HACK: transform vertices on the CPU(!)
+	// for (PosColVertex &v : lines_vertices) {
+	// 	vec4 res = CLIP_FROM_WORLD * vec4{v.Position.x, v.Position.y, v.Position.z, 1.0f};
+	// 	v.Position.x = res[0] / res[3];
+	// 	v.Position.y = res[1] / res[3];
+	// 	v.Position.z = res[2] / res[3];
+	// }
 }
 
 

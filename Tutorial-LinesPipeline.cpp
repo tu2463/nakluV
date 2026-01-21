@@ -16,11 +16,35 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 	VkShaderModule vert_module = rtg.helpers.create_shader_module(vert_code);
 	VkShaderModule frag_module = rtg.helpers.create_shader_module(frag_code);
 
+	{ // the set0_Camera layout holds a Camera sturcture in a uniform buffer used in the vertex shader
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT // vertex stage
+			},
+		};
+
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set_camera) );
+	}
+
 	{ // create pipeline layout; why do we need blocks like this in C++ //??
+		std::array< VkDescriptorSetLayout, 1 > layouts{
+			set0_Camera,
+		};
+
+		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //??
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = 0,
-			.pSetLayouts = nullptr,
+			.setLayoutCount = uint32_t(layouts.size()),
+			.pSetLayouts = layouts.data(),
 			.pushConstantRangeCount = 0,
 			.pPushConstantRanges = nullptr,
 		};
@@ -142,6 +166,11 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 
 void Tutorial::LinesPipeline::destroy(RTG &rtg) {
 	// refsol::LinesPipeline_destroy(rtg, &layout, &handle);
+	if (set0_Camera != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set0_Camera, nullptr);
+		set0_Camera = VK_NULL_HANDLE;
+	}
+
 	if (layout != VK_NULL_HANDLE) {
 		vkDestroyPipelineLayout(rtg.device, layout, nullptr);
 		layout = VK_NULL_HANDLE;
