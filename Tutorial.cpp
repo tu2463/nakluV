@@ -15,9 +15,48 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	background_pipeline.create(rtg, render_pass, 0);
 	lines_pipeline.create(rtg, render_pass, 0);
 
+	{ // create descriptor tool:
+		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
+
+		std::array< VkDescriptorPoolSize, 1 > pool_sizes{
+			// we only need uniform buffer descriptors for the moment:
+			VkDescriptorPoolSize{
+				.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorCount = 1 * per_workspace, // one descriptor per set, one set per workspace
+			},
+		};
+
+		VkDescriptorPoolCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
+			.maxSets = 1 * per_workspace, // one set per workspace
+			.poolSizeCount = uint32_t(pool_sizes.size()),
+			.pPoolSizes = pool_sizes.data(),
+		};
+
+		VK( vkCreateDescriptorPool(rtg.device, create_info, nullptr, &descriptor_pool) );
+	}
+
 	workspaces.resize(rtg.workspaces.size());
 	for (Workspace &workspace : workspaces) {
 		refsol::Tutorial_constructor_workspace(rtg, command_pool, &workspace.command_buffer);
+
+		workspace.Camera_src = rtg.helpers.create_buffer(
+			sizeof(LinesPipeline::Camera),
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // going to have GPU copy from this memory
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory, coherent (no special sync needed)
+			Helpers::Mapped // get a pointer to memory
+		);
+		workspace.Camera_src = rtg.helpers.create_buffer(
+			sizeof(LinesPipeline::Camera),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as a uniform buffer, also going to have GPU copy into this memory
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+			Helpers::Unmapped // don't get a pointer to memory
+		);
+
+		// TOOD: descriptor set
+
+		// TODO: descriptor write
 	}
 }
 
@@ -41,8 +80,21 @@ Tutorial::~Tutorial() {
 		if (workspace.lines_vertices.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.lines_vertices));
 		}
+
+		if (workspace.Camera_src.handle != VK_NULL_HANDLE)  {
+			rtg.helpers.destroy_buffer(std::move(workspace.Camera_src));
+		}
+		if (workspace.Camera.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(workspace.Camera));
+		}
 	}
 	workspaces.clear();
+
+	if (descriptor_pool) {
+		vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
+		descriptor_pool = nullptr;
+		// (this also frees the descriptor sets allocated from the pool)
+	}
 
 	background_pipeline.destroy(rtg);
 	lines_pipeline.destroy(rtg);
