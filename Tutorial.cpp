@@ -34,7 +34,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			.pPoolSizes = pool_sizes.data(),
 		};
 
-		VK( vkCreateDescriptorPool(rtg.device, create_info, nullptr, &descriptor_pool) );
+		VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &descriptor_pool) );
 	}
 
 	workspaces.resize(rtg.workspaces.size());
@@ -47,7 +47,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory, coherent (no special sync needed)
 			Helpers::Mapped // get a pointer to memory
 		);
-		workspace.Camera_src = rtg.helpers.create_buffer(
+		workspace.Camera = rtg.helpers.create_buffer(
 			sizeof(LinesPipeline::Camera),
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as a uniform buffer, also going to have GPU copy into this memory
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
@@ -220,6 +220,25 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		};
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
 
+		{ //upload camera info:
+			LinesPipeline::Camera camera{
+				.CLIP_FROM_WORLD = CLIP_FROM_WORLD
+			};
+			assert(workspace.Camera_src.size == sizeof(camera));
+
+			//host-side copy into Camera_src:
+			memcpy(workspace.Camera_src.allocation.data(), &camera, sizeof(camera));
+
+			//add device-side copy from Camera_src -> Camera:
+			assert(workspace.Camera_src.size == workspace.Camera.size);
+			VkBufferCopy copy_region{
+				.srcOffset = 0,
+				.dstOffset = 0,
+				.size = workspace.Camera_src.size,
+			};
+			vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
+		}
+		
 		{ // memory barrier to make sure copies compelte before rendering happens
 			VkMemoryBarrier memory_barrier{
 				.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -309,6 +328,20 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				uint32_t(vertex_buffers.size()), 
 				vertex_buffers.data(), 
 				offsets.data()
+			);
+		}
+
+		{ //bind Camera descriptor set:
+			std::array< VkDescriptorSet, 1 > descriptor_sets{
+				workspace.Camera_descriptors, //0: Camera
+			};
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer, //command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS, //pipeline bind point
+				lines_pipeline.layout, //pipeline layout
+				0, //first set
+				uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
+				0, nullptr //dynamic offsets count, ptr
 			);
 		}
 

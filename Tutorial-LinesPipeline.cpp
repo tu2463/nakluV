@@ -32,7 +32,7 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 			.pBindings = bindings.data(),
 		};
 
-		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set_camera) );
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set0_Camera) );
 	}
 
 	{ // create pipeline layout; why do we need blocks like this in C++ //??
