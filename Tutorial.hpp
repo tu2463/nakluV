@@ -78,7 +78,7 @@ struct Tutorial : RTG::Application {
 		// location for LinesPipeline::Camera data: (streamed to GPU per-frame)
 		Helpers::AllocatedBuffer Camera_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Camera; // device-local
-		VkDescriptorSet Camera_descriptrors; // references Camera
+		VkDescriptorSet Camera_descriptors; // references Camera
 	};
 	std::vector< Workspace > workspaces;
 

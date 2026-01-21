@@ -54,9 +54,46 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			Helpers::Unmapped // don't get a pointer to memory
 		);
 
-		// TOOD: descriptor set
+		// descriptor set:
+		{ //allocate descriptor set for Camera descriptor
+			VkDescriptorSetAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = descriptor_pool,
+				.descriptorSetCount = 1,
+				.pSetLayouts = &lines_pipeline.set0_Camera,
+			};
 
-		// TODO: descriptor write
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Camera_descriptors) );
+		}
+
+		// descriptor write:
+		{ //point descriptor to Camera buffer:
+			VkDescriptorBufferInfo Camera_info{
+				.buffer = workspace.Camera.handle,
+				.offset = 0,
+				.range = workspace.Camera.size,
+			};
+
+			std::array< VkWriteDescriptorSet, 1 > writes{
+				VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = workspace.Camera_descriptors,
+					.dstBinding = 0,
+					.dstArrayElement = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					.pBufferInfo = &Camera_info,
+				},
+			};
+
+			vkUpdateDescriptorSets(
+				rtg.device, //device
+				uint32_t(writes.size()), //descriptorWriteCount
+				writes.data(), //pDescriptorWrites
+				0, //descriptorCopyCount
+				nullptr //pDescriptorCopies
+			);
+		}
 	}
 }
 
