@@ -55,13 +55,33 @@ struct Tutorial : RTG::Application {
 		VkPipelineLayout layout = VK_NULL_HANDLE;
 		
 		// vertex bindings:
-		using Vertex = PosColVertex; // wht is using //??
+		using Vertex = PosColVertex;
 
 		VkPipeline handle = VK_NULL_HANDLE;
 
 		void create(RTG &, VkRenderPass render_pass, uint32_t subpass);
 		void destroy(RTG &);
 	} lines_pipeline; //?? what does the last line in this struct syntax mean?
+
+	struct ObjectsPipeline {
+		// descriptor set layouts:
+		VkDescriptorSetLayout set0_Camera = VK_NULL_HANDLE;
+
+		// types for descriptors:
+		using Camera = LinesPipeline::Camera;
+
+		// no push constants
+
+		VkPipelineLayout layout = VK_NULL_HANDLE;
+		
+		// vertex bindings:
+		using Vertex = PosColVertex;
+
+		VkPipeline handle = VK_NULL_HANDLE;
+
+		void create(RTG &, VkRenderPass render_pass, uint32_t subpass);
+		void destroy(RTG &);
+	} objects_pipeline;
 
 	//pools from which per-workspace things are allocated:
 	VkCommandPool command_pool = VK_NULL_HANDLE;
