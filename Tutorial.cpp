@@ -9,6 +9,13 @@
 #include <cstring>
 #include <iostream>
 
+#include <random>
+#include <algorithm>
+
+struct Vec3 {
+    float x, y, z;
+};
+
 Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
 
@@ -376,45 +383,70 @@ void Tutorial::update(float dt) {
 		);
 	}
 
-	{ // make some crossing lines at different depths:
+	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
 		lines_vertices.clear();
-		constexpr size_t count = 2 * 30 + 2 * 30; //?? what is constexpr?
+
+		constexpr uint32_t pyramids = 4;
+		constexpr size_t edges_per_pyramid = 6;
+		constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
 		lines_vertices.reserve(count);
-		// horizontal lines at z = 0.5f:
-		for (uint32_t i = 0; i < 30; ++i) {
-			float y = (i + 0.5f) / 30.0f * 2.0f - 1.0f;
+
+		auto vadd = [](Vec3 a, Vec3 b) -> Vec3 { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
+		auto vscale = [](Vec3 a, float s) -> Vec3 { return Vec3{a.x * s, a.y * s, a.z * s}; };
+
+		auto push_edge = [&](Vec3 a, Vec3 b,
+							uint8_t ar, uint8_t ag, uint8_t ab, uint8_t aa,
+							uint8_t br, uint8_t bg, uint8_t bb, uint8_t ba) {
 			lines_vertices.emplace_back(PosColVertex{
-				.Position{ .x = -1.0f, .y = y - 0.05f, .z = 0.5f },
-				.Color{ .r = 0x00, .g = 0x00, .b = 0x00, .a = 0xff },
+				.Position{ .x = a.x, .y = a.y, .z = a.z },
+				.Color{ .r = ar, .g = ag, .b = ab, .a = aa },
 			});
 			lines_vertices.emplace_back(PosColVertex{
-				.Position{ .x = 1.0f, .y = y + 0.05f, .z = 0.5f},
-				.Color{ .r = 0xff, .g = 0xff, .b = 0x00, .a = 0xff},
+				.Position{ .x = b.x, .y = b.y, .z = b.z },
+				.Color{ .r = br, .g = bg, .b = bb, .a = ba },
 			});
-		}
-		// vertical lines at z = 0.0f (near) through 1.0f (far)
-		for (uint32_t i = 0; i < 30; ++i) {
-			float x = (i + 0.5f) / 30.0f * 2.0f - 1.0f;
-			float z = (i + 0.5f) / 30.0f;
-			lines_vertices.emplace_back(PosColVertex{
-				.Position{.x = x + 0.05f, .y = -1.0f, .z = z},
-				.Color{ .r = 0x00, .g = 0x00, .b = 0xff, .a = 0xff},
-			});
-			lines_vertices.emplace_back(PosColVertex{
-				.Position{.x = x - 0.05f, .y = 1.0f, .z = z},
-				.Color{ .r = 0x44, .g = 0x00, .b = 0xff, .a = 0xff},
-			});
-		}
+		};
+
+		auto push_tetra = [&](Vec3 center, float s,
+							// color per vertex (apex, base1, base2, base3)
+							uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
+							uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
+							uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
+							uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
+
+			// Local tetra vertices (triangular pyramid), then translate by center:
+			Vec3 A = vadd(center, vscale(Vec3{ 0.0f,  0.75f,  0.0f}, s)); // apex
+			Vec3 B = vadd(center, vscale(Vec3{-0.65f, -0.375f, -0.45f}, s)); // base v1
+			Vec3 C = vadd(center, vscale(Vec3{ 0.65f, -0.375f, -0.45f}, s)); // base v2
+			Vec3 D = vadd(center, vscale(Vec3{ 0.0f, -0.375f,  0.75f}, s)); // base v3
+
+			// 6 edges:
+			push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
+			push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
+			push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
+
+			push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
+			push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
+			push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
+		};
+
+		const float s = 0.35f; // pyramid size
+
+		// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
+		push_tetra(Vec3{-0.45f,  0.35f, 0.25f}, s,
+				0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
+
+		push_tetra(Vec3{ 0.45f,  0.35f, 0.55f}, s,
+				0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
+
+		push_tetra(Vec3{-0.45f, -0.35f, 0.45f}, s,
+				0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
+
+		push_tetra(Vec3{ 0.45f, -0.35f, 0.15f}, s,
+				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
+
 		assert(lines_vertices.size() == count);
 	}
-
-	// // HACK: transform vertices on the CPU(!)
-	// for (PosColVertex &v : lines_vertices) {
-	// 	vec4 res = CLIP_FROM_WORLD * vec4{v.Position.x, v.Position.y, v.Position.z, 1.0f};
-	// 	v.Position.x = res[0] / res[3];
-	// 	v.Position.y = res[1] / res[3];
-	// 	v.Position.z = res[2] / res[3];
-	// }
 }
 
 
