@@ -103,6 +103,38 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			);
 		}
 	}
+
+	{
+		std::vector< PosColVertex > vertices;
+
+		// TODO: replace with more interesting geometry
+		// a single triangle
+		vertices.emplace_back(PosColVertex{
+			.Position{ .x = 0.0f, .y = 0.0f, .z = 0.0f },
+			.Color{ .r = 0xff, .g = 0xff, .b = 0xff, .a = 0xff },
+		});
+		vertices.emplace_back(PosColVertex{
+			.Position{ .x = 1.0f, .y = 0.0f, .z = 0.0f },
+			.Color{ .r = 0xff, .g = 0x00, .b = 0x00, .a = 0xff },
+		});
+		vertices.emplace_back(PosColVertex{
+			.Position{ .x = 0.0f, .y = 1.0f, .z = 0.0f },
+			.Color{ .r = 0x00, .g = 0xff, .b = 0x00, .a = 0xff  },
+		});
+
+		size_t bytes = vertices.size() * sizeof(vertices[0]);
+
+		object_vertices = rtg.helpers.create_buffer(
+			bytes,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU copy into this memory
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+			Helpers::Unmapped // don't get a pointer to memory
+		);
+
+		// copy data to buffer
+		// notice: this uploads the data during initialization instead of during the per-frame rendering loop (our rendering function Tutorial::render())// foreshadow!
+		rtg.helpers.transfer_to_buffer(vertices.data(), bytes, object_vertices);
+	}
 }
 
 Tutorial::~Tutorial() {
@@ -111,6 +143,8 @@ Tutorial::~Tutorial() {
 	if (VkResult result = vkDeviceWaitIdle(rtg.device); result != VK_SUCCESS) {
 		std::cerr << "Failed to vkDeviceWaitIdle in Tutorial::~Tutorial [" << string_VkResult(result) << "]; continuing anyway." << std::endl;
 	}
+
+	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it //??
 
 	if (swapchain_depth_image.handle != VK_NULL_HANDLE) {
 		destroy_framebuffers();
@@ -204,7 +238,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			);
 			workspace.lines_vertices = rtg.helpers.create_buffer(
 				new_bytes,
-				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. tge target if memory copy
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. the target if memory copy
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
 				Helpers::Unmapped // don't get a pointer to memory
 			);
@@ -288,7 +322,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	
 	vkCmdBeginRenderPass(workspace.command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	// TODO: run pipelines here
+	// run pipelines here:
 	{ // set scissor rectangle:
 		VkRect2D scissor{
 			.offset = {.x = 0, .y = 0},
@@ -356,6 +390,34 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 		// draw lines vertices:
 		vkCmdDraw(workspace.command_buffer, uint32_t(lines_vertices.size()), 1, 0, 0);
+	}
+
+	{ // draw with the objects pipeline
+		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, objects_pipeline.handle);
+
+		{// use object vertices (offset 0) as vertex buffer binding 0: // what does offset 0. and vertex buffer binding mean //??
+			std::array< VkBuffer, 1 > vertex_buffers{ object_vertices.handle };
+			std::array< VkDeviceSize, 1 > offsets{ 0 };
+			vkCmdBindVertexBuffers(
+				workspace.command_buffer,
+				0,
+				uint32_t(vertex_buffers.size()),
+				vertex_buffers.data(),
+				offsets.data()
+			);
+		}
+
+		// camera descriptor set is still bound (!) <- what does this mean //??
+		// we didn't need to re-bind the camera descriptor set -- we were able to leave it bound because set 0 for both the lines pipeline and the objects pipeline are compatible.
+
+		// draw all vertices:
+		vkCmdDraw(
+			workspace.command_buffer, 
+			uint32_t(object_vertices.size / sizeof(ObjectsPipeline::Vertex)), // kinda awkward now, TOOD: improve later
+			1, // instanceCount, 1 means only draw once
+			0, // firstVertex, 0 means start drawing from the first vertex
+			0 // firstInstance (only matters if instanceCount > 1)
+		);
 	}
 
 	vkCmdEndRenderPass(workspace.command_buffer);

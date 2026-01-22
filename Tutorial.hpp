@@ -105,6 +105,8 @@ struct Tutorial : RTG::Application {
 	//-------------------------------------------------------------------
 	//static scene resources:
 
+	Helpers::AllocatedBuffer object_vertices; //. why don't we want this to be per workspace? why are lines_vertices per workspace //vv because objects are static, can share among workspaces
+
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:
 

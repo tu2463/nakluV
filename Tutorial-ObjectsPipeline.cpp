@@ -12,7 +12,7 @@ static uint32_t frag_code[] =
 #include "spv/objects.frag.inl"
 ;
 
-void Tutorial::ObjectsPpeline::create(RTG &rtg, VkRenderPass render_pass, uint32_t subpass) {
+void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_t subpass) {
 	VkShaderModule vert_module = rtg.helpers.create_shader_module(vert_code);
 	VkShaderModule frag_module = rtg.helpers.create_shader_module(frag_code);
 
@@ -164,7 +164,7 @@ void Tutorial::ObjectsPpeline::create(RTG &rtg, VkRenderPass render_pass, uint32
 	vkDestroyShaderModule(rtg.device, vert_module, nullptr);
 }
 
-void Tutorial::ObjectsPpeline::destroy(RTG &rtg) {
+void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set0_Camera != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set0_Camera, nullptr);
 		set0_Camera = VK_NULL_HANDLE;
