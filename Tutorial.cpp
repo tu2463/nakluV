@@ -409,6 +409,9 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 		// camera descriptor set is still bound (!) <- what does this mean //??
 		// we didn't need to re-bind the camera descriptor set -- we were able to leave it bound because set 0 for both the lines pipeline and the objects pipeline are compatible.
+		// - You drew lines with the lines pipeline (camera was bound)
+		// - Now you switch to the objects pipeline with vkCmdBindPipeline
+		// - You don't need to rebind the camera descriptor set!
 
 		// draw all vertices:
 		vkCmdDraw(
