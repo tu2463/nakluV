@@ -154,7 +154,7 @@ void Helpers::create() {
 		.commandPool = transfer_command_pool,
 		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, // it can be submitted directly to a queue
 		.commandBufferCount = 1,
-	}
+	};
 	VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &transfer_command_buffer) );
 }
 

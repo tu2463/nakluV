@@ -104,22 +104,25 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		}
 	}
 
-	{
-		std::vector< PosColVertex > vertices;
+	{ //create object vertices
+		std::vector< PosNorTexVertex > vertices;
 
 		// TODO: replace with more interesting geometry
 		// a single triangle
-		vertices.emplace_back(PosColVertex{
+		vertices.emplace_back(PosNorTexVertex{
 			.Position{ .x = 0.0f, .y = 0.0f, .z = 0.0f },
-			.Color{ .r = 0xff, .g = 0xff, .b = 0xff, .a = 0xff },
+			.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
+			.TexCoord{ .s = 0.0f, .t = 0.0f },
 		});
-		vertices.emplace_back(PosColVertex{
+		vertices.emplace_back(PosNorTexVertex{
 			.Position{ .x = 1.0f, .y = 0.0f, .z = 0.0f },
-			.Color{ .r = 0xff, .g = 0x00, .b = 0x00, .a = 0xff },
+			.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
+			.TexCoord{ .s = 1.0f, .t = 0.0f },
 		});
-		vertices.emplace_back(PosColVertex{
+		vertices.emplace_back(PosNorTexVertex{
 			.Position{ .x = 0.0f, .y = 1.0f, .z = 0.0f },
-			.Color{ .r = 0x00, .g = 0xff, .b = 0x00, .a = 0xff  },
+			.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
+			.TexCoord{ .s = 0.0f, .t = 1.0f },
 		});
 
 		size_t bytes = vertices.size() * sizeof(vertices[0]);
