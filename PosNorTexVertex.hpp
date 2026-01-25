@@ -7,8 +7,7 @@
 struct PosNorTexVertex {
     struct { float x,y,z; } Position;
     struct { float x,y,z; } Normal;
-    struct { float s, t; } TexCoord; // what's this? how would it be used later on //??
-
+    struct { float s, t; } TexCoord; // s  horizontal (like u), t = vertical (like v). OpenGL convention for texture coordinates.
     // a pipeline vertex input state that works with a buffer holding a PosNorTexVertex[] array:
     static const VkPipelineVertexInputStateCreateInfo array_input_state;
 };
