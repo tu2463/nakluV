@@ -72,8 +72,8 @@ void main() {
     
     // Mix colors based on which line is visible
     vec3 color = backgroundColor;
-    color = mix(color, waveColor1, line1);
-    color = mix(color, waveColor2, line2);
+    // color = mix(color, waveColor1, line1);
+    //color = mix(color, waveColor2, line2);
     
     outColor = vec4(color, 1.0);
 }

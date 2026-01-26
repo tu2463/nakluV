@@ -161,38 +161,53 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	{ //create object vertices
 		std::vector< PosNorTexVertex > vertices;
 
-		{ // //A [-1,1]x[-1,1]x{0} quadrilateral:
+		{ // A sphere (using plane_vertices variable for the sphere geometry):
 			plane_vertices.first = uint32_t(vertices.size());
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = -1.0f, .y = -1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
-				.TexCoord{ .s = 0.0f, .t = 0.0f },
-			});
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = 1.0f, .y = -1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f},
-				.TexCoord{ .s = 1.0f, .t = 0.0f },
-			});
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = -1.0f, .y = 1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f},
-				.TexCoord{ .s = 0.0f, .t = 1.0f },
-			});
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = 1.0f, .y = 1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
-				.TexCoord{ .s = 1.0f, .t = 1.0f },
-			});
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = -1.0f, .y = 1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f},
-				.TexCoord{ .s = 0.0f, .t = 1.0f },
-			});
-			vertices.emplace_back(PosNorTexVertex{
-				.Position{ .x = 1.0f, .y = -1.0f, .z = 0.0f },
-				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f},
-				.TexCoord{ .s = 1.0f, .t = 0.0f },
-			});
+
+			constexpr float RADIUS = 0.4f;
+			constexpr uint32_t LAT_STEPS = 16; // latitude divisions
+			constexpr uint32_t LON_STEPS = 24; // longitude divisions
+
+			auto emplace_sphere_vertex = [&](uint32_t lat_i, uint32_t lon_i) {
+				// latitude angle: from -PI/2 (south) to PI/2 (north)
+				float phi = -float(M_PI) / 2.0f + float(M_PI) * (lat_i % (LAT_STEPS + 1)) / float(LAT_STEPS);
+				// longitude angle: from 0 to 2*PI
+				float theta = 2.0f * float(M_PI) * (lon_i % LON_STEPS) / float(LON_STEPS);
+
+				float cos_phi = std::cos(phi);
+				float sin_phi = std::sin(phi);
+				float cos_theta = std::cos(theta);
+				float sin_theta = std::sin(theta);
+
+				vertices.emplace_back(PosNorTexVertex{
+					.Position{
+						.x = RADIUS * cos_phi * cos_theta,
+						.y = RADIUS * cos_phi * sin_theta,
+						.z = RADIUS * sin_phi,
+					},
+					.Normal{
+						.x = cos_phi * cos_theta,
+						.y = cos_phi * sin_theta,
+						.z = sin_phi,
+					},
+					.TexCoord{
+						.s = lon_i / float(LON_STEPS),
+						.t = lat_i / float(LAT_STEPS),
+					},
+				});
+			};
+
+			for (uint32_t lat_i = 0; lat_i < LAT_STEPS; ++lat_i) {
+				for (uint32_t lon_i = 0; lon_i < LON_STEPS; ++lon_i) {
+					emplace_sphere_vertex(lat_i, lon_i);
+					emplace_sphere_vertex(lat_i + 1, lon_i);
+					emplace_sphere_vertex(lat_i, lon_i + 1);
+
+					emplace_sphere_vertex(lat_i, lon_i + 1);
+					emplace_sphere_vertex(lat_i + 1, lon_i);
+					emplace_sphere_vertex(lat_i + 1, lon_i + 1);
+				}
+			}
 
 			plane_vertices.count = uint32_t(vertices.size() - plane_vertices.first);
 		}
@@ -272,64 +287,63 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		{ //make some textures
 			textures.reserve(2);
 
-			{ //texture 0 will be a dark grey / light grey checkerboard with a red square at the origin.
-				//actually make the texture:
+			{ //texture 0: white to light blue gradient
 				uint32_t size = 128;
 				std::vector< uint32_t > data;
 				data.reserve(size * size);
 				for (uint32_t y = 0; y < size; ++y) {
-					float fy = (y + 0.5f) / float(size);
+					float t = y / float(size - 1); // 0 at top, 1 at bottom
+					// white (255,255,255) to light blue (180,210,255)
+					uint8_t r = uint8_t(255.0f - t * 75.0f);
+					uint8_t g = uint8_t(255.0f - t * 45.0f);
+					uint8_t b = 255;
+					uint8_t a = 255;
+					uint32_t pixel = uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24);
 					for (uint32_t x = 0; x < size; ++x) {
-						float fx = (x + 0.5f) / float(size);
-						//highlight the origin:
-						if      (fx < 0.05f && fy < 0.05f) data.emplace_back(0xff0000ff); //red
-						else if ( (fx < 0.5f) == (fy < 0.5f)) data.emplace_back(0xff444444); //dark grey
-						else data.emplace_back(0xffbbbbbb); //light grey
+						data.emplace_back(pixel);
 					}
 				}
 				assert(data.size() == size*size);
 
-				//make a place for the texture to live on the GPU:
 				textures.emplace_back(rtg.helpers.create_image(
-					VkExtent2D{ .width = size , .height = size }, //size of image
-					VK_FORMAT_R8G8B8A8_UNORM, //how to interpret image data (in this case, linearly-encoded 8-bit RGBA)
+					VkExtent2D{ .width = size , .height = size },
+					VK_FORMAT_R8G8B8A8_UNORM,
 					VK_IMAGE_TILING_OPTIMAL,
-					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, //will sample and upload
-					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, //should be device-local
+					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 					Helpers::Unmapped
 				));
 
-				//transfer data:
 				rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
 			}
 
-			{ //texture 1 will be a classic 'xor' texture:
-				//actually make the texture:
+			{ //texture 1: light blue to dark gray gradient
 				uint32_t size = 256;
 				std::vector< uint32_t > data;
 				data.reserve(size * size);
 				for (uint32_t y = 0; y < size; ++y) {
+					float t = y / float(size - 1); // 0 at top, 1 at bottom
+					// light blue (180,210,255) to dark gray (60,60,60)
+					uint8_t r = uint8_t(180.0f - t * 120.0f);
+					uint8_t g = uint8_t(210.0f - t * 150.0f);
+					uint8_t b = uint8_t(255.0f - t * 195.0f);
+					uint8_t a = 255;
+					uint32_t pixel = uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24);
 					for (uint32_t x = 0; x < size; ++x) {
-						uint8_t r = uint8_t(x) ^ uint8_t(y);
-						uint8_t g = uint8_t(x + 128) ^ uint8_t(y);
-						uint8_t b = uint8_t(x) ^ uint8_t(y + 27);
-						uint8_t a = 0xff;
-						data.emplace_back( uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24) );
+						data.emplace_back(pixel);
 					}
 				}
 				assert(data.size() == size*size);
 
-				//make a place for the texture to live on the GPU:
 				textures.emplace_back(rtg.helpers.create_image(
-					VkExtent2D{ .width = size , .height = size }, //size of image
-					VK_FORMAT_R8G8B8A8_SRGB, //how to interpret image data (in this case, SRGB-encoded 8-bit RGBA)
+					VkExtent2D{ .width = size , .height = size },
+					VK_FORMAT_R8G8B8A8_SRGB,
 					VK_IMAGE_TILING_OPTIMAL,
-					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, //will sample and upload
-					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, //should be device-local
+					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 					Helpers::Unmapped
 				));
 
-				//transfer data:
 				rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
 			}
 		}
@@ -910,8 +924,8 @@ void Tutorial::update(float dt) {
 			0.1f, //near
 			1000.0f //far
 		) * look_at(
-			3.0f * std::cos(ang), 3.0f * std::sin(ang), 1.0f, //eye
-			0.0f, 0.0f, 0.5f, //target
+			2.0f * std::cos(ang), 2.0f * std::sin(ang), 0.8f, //eye - closer to see the objects better
+			0.0f, 0.0f, 0.0f, //target - center where sphere and torus are
 			0.0f, 0.0f, 1.0f //up
 		);
 	}
@@ -999,36 +1013,37 @@ void Tutorial::update(float dt) {
 		assert(lines_vertices.size() == count);
 	}
 
-	{ // make some objects
+	{ // make some objects: sphere surrounded by rotating torus
 		object_instances.clear();
 
-		{ //plane translated +x by one unit:
-			mat4 WORLD_FROM_LOCAL{ //TODO: understand this
+		{ // sphere at center
+			mat4 WORLD_FROM_LOCAL{ // identity - sphere at origin
 				1.0f, 0.0f, 0.0f, 0.0f,
 				0.0f, 1.0f, 0.0f, 0.0f,
 				0.0f, 0.0f, 1.0f, 0.0f,
-				1.0f, 0.0f, 0.0f, 1.0f,
+				0.0f, 0.0f, 0.0f, 1.0f,
 			};
 
 			object_instances.emplace_back(ObjectInstance{
-				.vertices = plane_vertices,
-				.transform{ // TODO: understand this
+				.vertices = plane_vertices, // now contains sphere geometry
+				.transform{
 					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
-					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL, 
-					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL, // this is the normals? //??
+					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
+					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
 				},
-				.texture = 1,
+				.texture = 0,
 			});
 		}
-		{ //torus translated -x by one unit and rotated CCW around +y: TODO: understand this
+		{ // torus surrounding sphere, rotating around it
 			float ang = time / 60.0f * 2.0f * float(M_PI) * 10.0f;
 			float ca = std::cos(ang);
 			float sa = std::sin(ang);
+			// rotate around Y axis, centered at origin
 			mat4 WORLD_FROM_LOCAL{
 				  ca, 0.0f,  -sa, 0.0f,
 				0.0f, 1.0f, 0.0f, 0.0f,
 				  sa, 0.0f,   ca, 0.0f,
-				-1.0f,0.0f, 0.0f, 1.0f,
+				0.0f, 0.0f, 0.0f, 1.0f,
 			};
 
 			object_instances.emplace_back(ObjectInstance{
@@ -1038,6 +1053,7 @@ void Tutorial::update(float dt) {
 					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
 					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
 				},
+				.texture = 1,
 			});
 		}
 	}
