@@ -71,9 +71,9 @@ struct Tutorial : RTG::Application {
 
 		// types for descriptors:
 		struct Transform {
-			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space
-			mat4 WORLD_FROM_LOCAL; // from local positions to world space
-			mat4 WORLD_FROM_LOCAL_NORMAL; // normals
+			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space, for gl_Position
+			mat4 WORLD_FROM_LOCAL; // from local positions to world space, for positions (lighting calculations)
+			mat4 WORLD_FROM_LOCAL_NORMAL; // for normals = transpose(inverse(WORLD_FROM_LOCAL))
 		};
 		static_assert(sizeof(Transform) == 16*4 + 16*4 + 16*4, "Transform is the expected size.");
 
@@ -112,14 +112,14 @@ struct Tutorial : RTG::Application {
 		// location for ObjectsPipeline::Transforms data: (streamed to GPU per-frame)
 		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Transforms; // device-local
-		VkDescriptorSet Transforms_descriptors; // references Transforms
+		VkDescriptorSet Transforms_descriptors; // references Transforms, the descriptor set
 	};
 	std::vector< Workspace > workspaces;
 
 	//-------------------------------------------------------------------
 	//static scene resources:
 
-	Helpers::AllocatedBuffer object_vertices; //. why don't we want this to be per workspace? why are lines_vertices per workspace //vv because objects are static, can share among workspaces
+	Helpers::AllocatedBuffer object_vertices; // why don't we want this to be per workspace? why are lines_vertices per workspace //vv because objects are static, can share among workspaces
 	struct ObjectVertices {
 		uint32_t first = 0;
 		uint32_t count = 0;
@@ -149,6 +149,12 @@ struct Tutorial : RTG::Application {
 	mat4 CLIP_FROM_WORLD;
 
 	std::vector< LinesPipeline::Vertex > lines_vertices;
+
+	struct ObjectInstance {
+		ObjectVertices vertices;
+		ObjectsPipeline::Transform transform;
+	};
+	std::vector< ObjectInstance > object_instances;
 
 	//--------------------------------------------------------------------
 	//Rendering function, uses all the resources above to queue work to draw a frame:

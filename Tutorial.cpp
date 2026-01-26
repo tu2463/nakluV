@@ -122,6 +122,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		std::vector< PosNorTexVertex > vertices;
 
 		{ // //A [-1,1]x[-1,1]x{0} quadrilateral:
+			plane_vertices.first = uint32_t(vertices.size());
 			vertices.emplace_back(PosNorTexVertex{
 				.Position{ .x = -1.0f, .y = -1.0f, .z = 0.0f },
 				.Normal{ .x = 0.0f, .y = 0.0f, .z = 1.0f },
@@ -216,8 +217,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		}
 
 		size_t bytes = vertices.size() * sizeof(vertices[0]);
-plane_vertices.first = uint32_t(vertices.size());
-		
+
 		object_vertices = rtg.helpers.create_buffer(
 			bytes,
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU copy into this memory
@@ -264,8 +264,8 @@ Tutorial::~Tutorial() {
 		if (workspace.Transforms.handle != VK_NULL_HANDLE)  {
 			rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
 		}
-		if (workspace.Transforms.handle != VK_NULL_HANDLE) {
-			rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+		if (workspace.Transforms_src.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(workspace.Transforms_src));
 		}
 		// Transforms_descriptors freed when pool is destroyed
 	}
@@ -364,43 +364,119 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			.size = needed_bytes,
 		};
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
+	}
 
-		{ //upload camera info:
-			LinesPipeline::Camera camera{
-				.CLIP_FROM_WORLD = CLIP_FROM_WORLD
-			};
-			assert(workspace.Camera_src.size == sizeof(camera));
+	{ // upload camera info:
+		LinesPipeline::Camera camera{
+			.CLIP_FROM_WORLD = CLIP_FROM_WORLD};
+		assert(workspace.Camera_src.size == sizeof(camera));
 
-			//host-side copy into Camera_src:
-			memcpy(workspace.Camera_src.allocation.data(), &camera, sizeof(camera));
+		// host-side copy into Camera_src:
+		memcpy(workspace.Camera_src.allocation.data(), &camera, sizeof(camera));
 
-			//add device-side copy from Camera_src -> Camera:
-			assert(workspace.Camera_src.size == workspace.Camera.size);
-			VkBufferCopy copy_region{
-				.srcOffset = 0,
-				.dstOffset = 0,
-				.size = workspace.Camera_src.size,
-			};
-			vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
-		}
-		
-		{ // memory barrier to make sure copies compelte before rendering happens
-			VkMemoryBarrier memory_barrier{
-				.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-				.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
-				.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-			};
+		// add device-side copy from Camera_src -> Camera:
+		assert(workspace.Camera_src.size == workspace.Camera.size);
+		VkBufferCopy copy_region{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = workspace.Camera_src.size,
+		};
+		vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
+	}
 
-			vkCmdPipelineBarrier(
-				workspace.command_buffer,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, // srcStageMask; ensures all transfer operations (like buffer copies) complete
-				VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, // dstStageMask; wait for all transfer ops before vertex input reads the data
-				0, // dependencyFlags,
-				1, &memory_barrier, // memoryBarriers (count, data)
-				0, nullptr, // bufferMemoryBarriers (count, data)
-				0, nullptr // imageMemoryBarriers (count, data)
+	if (!object_instances.empty()) { // upload lines vertices
+		//[re-]allocate lines buffers if needed:
+		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
+		if (workspace.Transforms_src.handle == VK_NULL_HANDLE || workspace.Transforms_src.size < needed_bytes) { // if the source buffer is missing or too small
+			//round to next multiple of 4k to avoid re-allocating continuously if vertex count grows slowly
+			size_t new_bytes = ((needed_bytes + 4096) / 4096) * 4096; 
+			if (workspace.Transforms_src.handle) {
+				rtg.helpers.destroy_buffer(std::move(workspace.Transforms_src));
+			}
+			if (workspace.Transforms.handle) {
+				rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+			}
+
+			workspace.Transforms_src = rtg.helpers.create_buffer(
+				new_bytes, 
+				VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // /going to have GPU copy from this memory
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (the memory can be mapped from the CPU side), coherent (no special sync needed) (the memory doesn't require special flush operations to make host writes available)
+				Helpers::Mapped // get a pointer to the memory
 			);
+			workspace.Transforms = rtg.helpers.create_buffer(
+				new_bytes,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. the target if memory copy
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+				Helpers::Unmapped // don't get a pointer to memory
+			);
+
+			// update the descriptor set:
+			// Tells Vulkan "the Transforms shader binding should point to this specific buffer."
+			// It connects your GPU buffer to the shader's descriptor.  
+			VkDescriptorBufferInfo Transforms_info{ // Describe the buffer
+				.buffer = workspace.Transforms.handle, // which buffer
+				.offset = 0, // start at beginning
+				.range = workspace.Transforms.size, // use whole buffer
+			};
+
+			std::array< VkWriteDescriptorSet, 1 > writes{
+				VkWriteDescriptorSet{ // describe the write operation
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  
+					.dstSet = workspace.Transforms_descriptors, // which descriptor set to update  
+					.dstBinding = 0, // binding 0 in that set
+					.dstArrayElement = 0, // first element (if it were an array)
+					.descriptorCount = 1,  // updating 1 descriptor
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+					.pBufferInfo = &Transforms_info, 
+				},
+			};
+
+			vkUpdateDescriptorSets( // execute the update (update includes all operations above, like the object_instances, etc.)
+				rtg.device,
+				uint32_t(writes.size()), writes.data(), // descriptorWrites count, data
+				0, nullptr // descriptorCopies count, data
+			);
+
+			std::cout << "Re-allocated object buffers to " << new_bytes << " bytes." << std::endl;
 		}
+
+		assert(workspace.Transforms.size == workspace.Transforms.size);
+		assert(workspace.Transforms.size >= needed_bytes);
+
+		{ //copy transforms into Transforms_src: use the CPU to copy from the transforms to the workspace.Transforms_src staging buffer
+			assert(workspace.Transforms_src.allocation.mapped);
+			ObjectsPipeline::Transform *out = reinterpret_cast< ObjectsPipeline::Transform* >(workspace.Transforms_src.allocation.data()); // struct aliasing violation, but it doesn't matter
+			for (ObjectInstance const &inst : object_instances) {
+				*out = inst.transform;
+				++out;
+			}
+		}
+		// device-side copy from lines_vertices_src -> lines_vertices:
+		// record a command to have the GPU copy the data from the staging buffer to the workspace.lines_vertices buffer.
+		VkBufferCopy copy_region{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = needed_bytes,
+		};
+		vkCmdCopyBuffer(workspace.command_buffer, workspace.Transforms_src.handle, workspace.Transforms.handle, 1, &copy_region);
+	}
+
+	{ // memory barrier to make sure copies compelte before rendering happens
+		VkMemoryBarrier memory_barrier{
+			.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+			.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+			.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+		};
+
+		vkCmdPipelineBarrier(
+			workspace.command_buffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,		// srcStageMask; ensures all transfer operations (like buffer copies) complete
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, // dstStageMask; wait for all transfer ops before vertex input reads the data
+			0,									// dependencyFlags,
+			1, &memory_barrier,					// memoryBarriers (count, data)
+			0, nullptr,							// bufferMemoryBarriers (count, data)
+			0, nullptr							// imageMemoryBarriers (count, data)
+		);
 	}
 
 	// put GPU commands here
@@ -509,20 +585,31 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			);
 		}
 
-		// camera descriptor set is still bound (!) <- what does this mean //??
+		{ //bind Transforms descriptor set:
+			std::array< VkDescriptorSet, 1 > descriptor_sets{
+				workspace.Transforms_descriptors, //1: Transforms
+			};
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer, //command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS, //pipeline bind point
+				objects_pipeline.layout, //pipeline layout
+				1, //first set
+				uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
+				0, nullptr //dynamic offsets count, ptr
+			);
+		}
+
+		// camera descriptor set is still bound (!), but not used <- what does this mean //??
 		// we didn't need to re-bind the camera descriptor set -- we were able to leave it bound because set 0 for both the lines pipeline and the objects pipeline are compatible.
 		// - You drew lines with the lines pipeline (camera was bound)
 		// - Now you switch to the objects pipeline with vkCmdBindPipeline
 		// - You don't need to rebind the camera descriptor set!
 
-		// draw all vertices:
-		vkCmdDraw(
-			workspace.command_buffer, 
-			uint32_t(object_vertices.size / sizeof(ObjectsPipeline::Vertex)), // kinda awkward now, TOOD: improve later
-			1, // instanceCount, 1 means only draw once
-			0, // firstVertex, 0 means start drawing from the first vertex
-			0 // firstInstance (only matters if instanceCount > 1), determines value of gl_InstanceIndex in the vertex shader
-		);
+		// draw all instances:
+		for (ObjectInstance const &inst : object_instances) {
+			uint32_t index = uint32_t(&inst - &object_instances[0]);
+			vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index);
+		}
 	}
 
 	vkCmdEndRenderPass(workspace.command_buffer);
@@ -615,6 +702,48 @@ void Tutorial::update(float dt) {
 				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
 
 		assert(lines_vertices.size() == count);
+	}
+
+	{ // make some objects
+		object_instances.clear();
+
+		{ //plane translated +x by one unit:
+			mat4 WORLD_FROM_LOCAL{ //TODO: understand this
+				1.0f, 0.0f, 0.0f, 0.0f,
+				0.0f, 1.0f, 0.0f, 0.0f,
+				0.0f, 0.0f, 1.0f, 0.0f,
+				1.0f, 0.0f, 0.0f, 1.0f,
+			};
+
+			object_instances.emplace_back(ObjectInstance{
+				.vertices = plane_vertices,
+				.transform{ // TODO: understand this
+					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
+					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL, 
+					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL, // this is the normals? //??
+				},
+			});
+		}
+		{ //torus translated -x by one unit and rotated CCW around +y: TODO: understand this
+			float ang = time / 60.0f * 2.0f * float(M_PI) * 10.0f;
+			float ca = std::cos(ang);
+			float sa = std::sin(ang);
+			mat4 WORLD_FROM_LOCAL{
+				  ca, 0.0f,  -sa, 0.0f,
+				0.0f, 1.0f, 0.0f, 0.0f,
+				  sa, 0.0f,   ca, 0.0f,
+				-1.0f,0.0f, 0.0f, 1.0f,
+			};
+
+			object_instances.emplace_back(ObjectInstance{
+				.vertices = torus_vertices,
+				.transform{
+					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
+					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
+					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
+				},
+			});
+		}
 	}
 }
 
