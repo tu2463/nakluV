@@ -39,7 +39,6 @@ void Tutorial::LinesPipeline::create(RTG &rtg, VkRenderPass render_pass, uint32_
 		std::array< VkDescriptorSetLayout, 1 > layouts{
 			set0_Camera,
 		};
-
 		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //??
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,

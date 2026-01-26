@@ -499,7 +499,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			uint32_t(object_vertices.size / sizeof(ObjectsPipeline::Vertex)), // kinda awkward now, TOOD: improve later
 			1, // instanceCount, 1 means only draw once
 			0, // firstVertex, 0 means start drawing from the first vertex
-			0 // firstInstance (only matters if instanceCount > 1)
+			0 // firstInstance (only matters if instanceCount > 1), determines value of gl_InstanceIndex in the vertex shader
 		);
 	}
 
