@@ -40,7 +40,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = 2 * per_workspace, // two sets per workspace (for uniform buffer and storage buffer)
+			.maxSets = 3 * per_workspace, // three sets per workspace (Camera, World, Transforms)
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(),
 		};
@@ -633,6 +633,22 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
 	}
 
+	{ //upload world info:
+		assert(workspace.Camera_src.size == sizeof(world));
+
+		//host-side copy into World_src:
+		memcpy(workspace.World_src.allocation.data(), &world, sizeof(world));
+
+		//add device-side copy from World_src -> World:
+		assert(workspace.World_src.size == workspace.World.size);
+		VkBufferCopy copy_region{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = workspace.World_src.size,
+		};
+		vkCmdCopyBuffer(workspace.command_buffer, workspace.World_src.handle, workspace.World.handle, 1, &copy_region);
+	}
+
 	if (!object_instances.empty()) { // upload lines vertices
 		//[re-]allocate lines buffers if needed:
 		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
@@ -835,14 +851,15 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		}
 
 		{ //bind Transforms descriptor set:
-			std::array< VkDescriptorSet, 1 > descriptor_sets{
+			std::array< VkDescriptorSet, 2 > descriptor_sets{
+				workspace.World_descriptors, //0: World
 				workspace.Transforms_descriptors, //1: Transforms
 			};
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer, //command buffer
 				VK_PIPELINE_BIND_POINT_GRAPHICS, //pipeline bind point
 				objects_pipeline.layout, //pipeline layout
-				1, //first set
+				0, //first set
 				uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
 				0, nullptr //dynamic offsets count, ptr
 			);
@@ -897,6 +914,24 @@ void Tutorial::update(float dt) {
 			0.0f, 0.0f, 0.5f, //target
 			0.0f, 0.0f, 1.0f //up
 		);
+	}
+
+	{ //static sun and sky:
+		world.SKY_DIRECTION.x = 0.0f;
+		world.SKY_DIRECTION.y = 0.0f;
+		world.SKY_DIRECTION.z = 1.0f;
+
+		world.SKY_ENERGY.r = 0.1f;
+		world.SKY_ENERGY.g = 0.1f;
+		world.SKY_ENERGY.b = 0.2f;
+
+		world.SUN_DIRECTION.x = 6.0f / 23.0f;
+		world.SUN_DIRECTION.y = 13.0f / 23.0f;
+		world.SUN_DIRECTION.z = 18.0f / 23.0f;
+
+		world.SUN_ENERGY.r = 1.0f;
+		world.SUN_ENERGY.g = 1.0f;
+		world.SUN_ENERGY.b = 0.9f;
 	}
 
 	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
