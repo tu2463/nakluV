@@ -384,8 +384,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
 	}
 
-	if (!object_instances.empty()) { // upload lines vertices
-		//[re-]allocate lines buffers if needed:
+	if (!object_instances.empty()) { // upload object transforms:
+		//[re-]allocate object buffers if needed:
 		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
 		if (workspace.Transforms_src.handle == VK_NULL_HANDLE || workspace.Transforms_src.size < needed_bytes) { // if the source buffer is missing or too small
 			//round to next multiple of 4k to avoid re-allocating continuously if vertex count grows slowly
@@ -412,15 +412,17 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 			// update the descriptor set:
 			// Tells Vulkan "the Transforms shader binding should point to this specific buffer."
-			// It connects your GPU buffer to the shader's descriptor.  
-			VkDescriptorBufferInfo Transforms_info{ // Describe the buffer
+			// It connects your GPU buffer to the shader's descriptor. 
+			// Describe the buffer:
+			VkDescriptorBufferInfo Transforms_info{ 
 				.buffer = workspace.Transforms.handle, // which buffer
 				.offset = 0, // start at beginning
 				.range = workspace.Transforms.size, // use whole buffer
 			};
 
+			// describe the write operation:
 			std::array< VkWriteDescriptorSet, 1 > writes{
-				VkWriteDescriptorSet{ // describe the write operation
+				VkWriteDescriptorSet{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  
 					.dstSet = workspace.Transforms_descriptors, // which descriptor set to update  
 					.dstBinding = 0, // binding 0 in that set
@@ -431,7 +433,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				},
 			};
 
-			vkUpdateDescriptorSets( // execute the update (update includes all operations above, like the object_instances, etc.)
+			// execute the update (update includes all operations above, like the object_instances, etc.)
+			vkUpdateDescriptorSets( 
 				rtg.device,
 				uint32_t(writes.size()), writes.data(), // descriptorWrites count, data
 				0, nullptr // descriptorCopies count, data
@@ -570,7 +573,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdDraw(workspace.command_buffer, uint32_t(lines_vertices.size()), 1, 0, 0);
 	}
 
-	{ // draw with the objects pipeline
+	if (!object_instances.empty()) { // draw with the objects pipeline
 		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, objects_pipeline.handle);
 
 		{// use object vertices (offset 0) as vertex buffer binding 0: // what does offset 0. and vertex buffer binding mean //??
@@ -585,21 +588,21 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			);
 		}
 
-		{ //bind Transforms descriptor set:
+		{ // bind Transforms descriptor set:
 			std::array< VkDescriptorSet, 1 > descriptor_sets{
-				workspace.Transforms_descriptors, //1: Transforms
+				workspace.Transforms_descriptors, // 1: Transforms
 			};
 			vkCmdBindDescriptorSets(
-				workspace.command_buffer, //command buffer
-				VK_PIPELINE_BIND_POINT_GRAPHICS, //pipeline bind point
-				objects_pipeline.layout, //pipeline layout
-				1, //first set
-				uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
-				0, nullptr //dynamic offsets count, ptr
+				workspace.command_buffer, // command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
+				objects_pipeline.layout, // pipeline layout
+				1, // our descriptor set got bound as set 1, not set 0.
+				uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
+				0, nullptr // dynamic offsets count, ptr
 			);
 		}
 
-		// camera descriptor set is still bound (!), but not used <- what does this mean //??
+		// camera descriptor set is still bound (!), but not used <- what does this mean //vv
 		// we didn't need to re-bind the camera descriptor set -- we were able to leave it bound because set 0 for both the lines pipeline and the objects pipeline are compatible.
 		// - You drew lines with the lines pipeline (camera was bound)
 		// - Now you switch to the objects pipeline with vkCmdBindPipeline
