@@ -118,6 +118,11 @@ struct Tutorial : RTG::Application {
 
 		// we'll need a descriptor set and a buffer to point it at.
 		// We'll stream the transformations per-frame, so we'll define them per workspace
+		//location for ObjectsPipeline::World data: (streamed to GPU per-frame)
+		Helpers::AllocatedBuffer World_src; //host coherent; mapped
+		Helpers::AllocatedBuffer World; //device-local
+		VkDescriptorSet World_descriptors; //references World
+		
 		// location for ObjectsPipeline::Transforms data: (streamed to GPU per-frame)
 		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Transforms; // device-local
