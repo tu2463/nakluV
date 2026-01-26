@@ -16,6 +16,25 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 	VkShaderModule vert_module = rtg.helpers.create_shader_module(vert_code);
 	VkShaderModule frag_module = rtg.helpers.create_shader_module(frag_code);
 
+	{ //the set0_World layout holds world info in a uniform buffer used in the fragment shader:
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+			},
+		};
+		
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set0_World) );
+	}
+
 	{ // the set1_Transforms layout holds an array of Transform sturctures in a storage buffer used in the vertex shader:
 		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
 			VkDescriptorSetLayoutBinding{
@@ -56,7 +75,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 
 	{ // create pipeline layout; why do we need blocks like this in C++ //??
 		std::array< VkDescriptorSetLayout, 3 > layouts{
-			set1_Transforms, //we'd like to say "VK_NULL_HANDLE" here, but that's not valid without an extension - what does this mean //?/
+			set0_World,
 			set1_Transforms,
 			set2_TEXTURE,
 		};
@@ -185,6 +204,11 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 }
 
 void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
+	if (set0_World != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set0_World, nullptr);
+		set0_World = VK_NULL_HANDLE;
+	}
+	
 	if (set1_Transforms != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set1_Transforms, nullptr);
 		set1_Transforms = VK_NULL_HANDLE;
