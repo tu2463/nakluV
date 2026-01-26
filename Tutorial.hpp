@@ -68,6 +68,7 @@ struct Tutorial : RTG::Application {
 		// descriptor set layouts:
 		// VkDescriptorSetLayout set0_Camera = VK_NULL_HANDLE; //we'll get back to set0
 		VkDescriptorSetLayout set1_Transforms;
+		VkDescriptorSetLayout set2_TEXTURE = VK_NULL_HANDLE;
 
 		// types for descriptors:
 		struct Transform {
