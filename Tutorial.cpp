@@ -608,6 +608,17 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
 			uint32_t index = uint32_t(&inst - &object_instances[0]);
+
+			//bind texture descriptor set:
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer, //command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS, //pipeline bind point
+				objects_pipeline.layout, //pipeline layout
+				2, //second set
+				1, &texture_descriptors[inst.texture], //descriptor sets count, ptr
+				0, nullptr //dynamic offsets count, ptr
+			);
+			
 			vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index);
 		}
 	}

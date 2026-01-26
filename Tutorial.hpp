@@ -127,6 +127,12 @@ struct Tutorial : RTG::Application {
 	ObjectVertices plane_vertices;
 	ObjectVertices torus_vertices;
 
+	std::vector< Helpers::AllocatedImage > textures;
+	std::vector< VkImageView > texture_views;
+	VkSampler texture_sampler = VK_NULL_HANDLE;
+	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE;
+	std::vector< VkDescriptorSet > texture_descriptors; //allocated from texture_descriptor_pool
+
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:
 
@@ -153,6 +159,7 @@ struct Tutorial : RTG::Application {
 	struct ObjectInstance {
 		ObjectVertices vertices;
 		ObjectsPipeline::Transform transform;
+		uint32_t texture = 0;
 	};
 	std::vector< ObjectInstance > object_instances;
 
