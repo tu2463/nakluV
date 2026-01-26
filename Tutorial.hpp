@@ -66,10 +66,16 @@ struct Tutorial : RTG::Application {
 
 	struct ObjectsPipeline {
 		// descriptor set layouts:
-		VkDescriptorSetLayout set0_Camera = VK_NULL_HANDLE;
+		// VkDescriptorSetLayout set0_Camera = VK_NULL_HANDLE; //we'll get back to set0
+		VkDescriptorSetLayout set1_Transforms;
 
 		// types for descriptors:
-		using Camera = LinesPipeline::Camera;
+		struct Transform {
+			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space
+			mat4 WORLD_FROM_LOCAL; // from local positions to world space
+			mat4 WORLD_FROM_LOCAL_NORMAL; // normals
+		};
+		static_assert(sizeof(Transform) == 16*4 + 16*4 + 16*4, "Transform is the expected size.");
 
 		// no push constants
 
@@ -100,6 +106,13 @@ struct Tutorial : RTG::Application {
 		Helpers::AllocatedBuffer Camera_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Camera; // device-local
 		VkDescriptorSet Camera_descriptors; // references Camera
+
+		// we'll need a descriptor set and a buffer to point it at.
+		// We'll stream the transformations per-frame, so we'll define them per workspace
+		// location for ObjectsPipeline::Transforms data: (streamed to GPU per-frame)
+		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
+		Helpers::AllocatedBuffer Transforms; // device-local
+		VkDescriptorSet Transforms_descriptors; // references Transforms
 	};
 	std::vector< Workspace > workspaces;
 

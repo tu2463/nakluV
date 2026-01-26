@@ -26,10 +26,13 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 	{ // create descriptor tool:
 		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
 
-		std::array< VkDescriptorPoolSize, 1 > pool_sizes{
-			// we only need uniform buffer descriptors for the moment:
-			VkDescriptorPoolSize{
+		std::array< VkDescriptorPoolSize, 2 > pool_sizes{
+			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+				.descriptorCount = 1 * per_workspace, // one descriptor per set, one set per workspace
+			},
+			VkDescriptorPoolSize{ // uniform buffer descriptors
+				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1 * per_workspace, // one descriptor per set, one set per workspace
 			},
 		};
@@ -37,7 +40,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = 1 * per_workspace, // one set per workspace
+			.maxSets = 2 * per_workspace, // two sets per workspace (for uniform buffer and storage buffer)
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(),
 		};
@@ -72,6 +75,17 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			};
 
 			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Camera_descriptors) );
+		}
+
+		{ //allocate descriptor set for Transforms descriptor
+			VkDescriptorSetAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = descriptor_pool,
+				.descriptorSetCount = 1,
+				.pSetLayouts = &objects_pipeline.set1_Transforms,
+			};
+
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Transforms_descriptors) ); // NOTE: we will fill in this descriptor set in render when buffers are [re-]allocated
 		}
 
 		// descriptor write:
@@ -246,6 +260,14 @@ Tutorial::~Tutorial() {
 		if (workspace.Camera.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.Camera));
 		}
+
+		if (workspace.Transforms.handle != VK_NULL_HANDLE)  {
+			rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+		}
+		if (workspace.Transforms.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+		}
+		// Transforms_descriptors freed when pool is destroyed
 	}
 	workspaces.clear();
 

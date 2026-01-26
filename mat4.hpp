@@ -7,13 +7,13 @@
 #include <cstdint>
 
 // Note: column-major storage order (like in OpenGL / GLSL)
-using mat4 = std::array< float, 16 >; // what does "using" mean //??
+using mat4 = std::array< float, 16 >; // what does "using" mean //vv
 static_assert(sizeof(mat4) == 16 * 4, "mat4 is exactly 16 32-bit floats");
 
 using vec4 = std::array< float, 4 >;
 static_assert(sizeof(vec4) == 4 * 4, "vec4 is exactly 4 32-bit floats");
 
-inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean? what does the syntax "operator*" mean //??
+inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean //vv what does the syntax "operator*" mean //??
     vec4 ret;
     // compute ret = A * b
     for (uint32_t r = 0; r < 4; ++r) {
