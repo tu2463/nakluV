@@ -22,7 +22,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 				.binding = 0,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT // vertex stage
+				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT // vertex stage (for vertex shader, not for fragment shader)
 			},
 		};
 
@@ -35,10 +35,30 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_Transforms) );
 	}
 
+	{ // the set2_TEXTURE layout has a single descriptor for a sampler2D used in the fragment shader:
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // because a GLSL sampler2D references both an image and the parameters for how to sample from that image.
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT // fragment stage
+			},
+		};
+
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set2_TEXTURE) );
+	}
+
 	{ // create pipeline layout; why do we need blocks like this in C++ //??
 		std::array< VkDescriptorSetLayout, 2 > layouts{
 			set1_Transforms, //we'd like to say "VK_NULL_HANDLE" here, but that's not valid without an extension - what does this mean //?/
 			set1_Transforms,
+			set2_TEXTURE,
 		};
 		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //??
@@ -168,6 +188,11 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set1_Transforms != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set1_Transforms, nullptr);
 		set1_Transforms = VK_NULL_HANDLE;
+	}
+
+	if (set0_TEXTURE != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set0_TEXTURE, nullptr);
+		set0_TEXTURE = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {

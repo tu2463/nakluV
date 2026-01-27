@@ -617,11 +617,11 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				workspace.command_buffer, // command buffer
 				VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
 				objects_pipeline.layout, // pipeline layout
-				2, // second set
-				1, &texture_descriptors[inst.texture], // descriptor sets count, ptr
+				2, // set number (slot 2)   
+				1, &texture_descriptors[inst.texture], // descriptor sets count, ptr (which descriptor set to put in slot 2)
 				0, nullptr // dynamic offsets count, ptr
 			)
-			
+
 			vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index);
 		}
 	}
