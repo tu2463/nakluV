@@ -229,6 +229,193 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		// notice: this uploads the data during initialization instead of during the per-frame rendering loop (our rendering function Tutorial::render())// foreshadow!
 		rtg.helpers.transfer_to_buffer(vertices.data(), bytes, object_vertices);
 	}
+
+	{ // make some textures
+		textures.reserve(2);
+
+		{ //texture 0 will be a dark grey / light grey checkerboard with a red square at the origin.
+			// actually make the texture:
+			uint32_t size = 128; // 128*128 checkerboard
+			std::vector< uint32_t > data;
+			data.reserve(size * size);
+			for (uint32_t y = 0; y < size; ++y) {
+				float fy = (y + 0.5f) / float(size);
+				for (uint32_t x = 0; x < size; ++x) {
+					float fx = (x + 0.5f) / float(size);
+					// highlight the origin:
+					// If the fractional coordinates fx and fy are both in the bottom-left 5% of a tile, the pixel is red (0xff0000ff = A:255, B:0, G:0, R:255):
+					if (fx < 0.05f && fy < 0.05f) data.emplace_back(0xff0000ff);
+					else if ((fx < 0.5f) == (fy < 0.5f)) data.emplace_back(0xff444444); // If both coordinates are in the same half (both < 0.5 or both >= 0.5), the pixel is dark gray
+					else data.emplace_back(0xffbbbbbb); // light grey
+				}
+			}
+			assert(data.size() == size*size);
+
+			// make a place for the texture to live on the GPU:
+			textures.emplace_back(rtg.helpers.create_image(
+				VkExtent2D{ .width = size, .height = size }, // size of image
+				VK_FORMAT_R8G8B8A8_UNORM, // how to interpret image data (in this case, linearly-encoded 8-bit RGBA) - refer to color spaces lecture!
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, // will sample and upload
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // should be device-local
+				Helpers::Unmapped
+			));
+
+			// transfer data:
+			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
+		}
+
+		{ // texture 1 will be a classic 'xor' texture
+			// actually make the texture:
+			uint32_t size = 256; //??
+			std::vector< uint32_t > data;
+			data.reserve(size * size);
+			for (uint32_t y = 0; y < size; ++y) {
+				for (uint32_t x = 0; x < size; ++x) {
+					uint8_t r = uint8_t(x) ^ uint8_t(y);
+					uint8_t g = uint8_t(x + 128) ^ uint8_t(y);
+					uint8_t b = uint8_t(x) ^ uint8_t(y + 27);
+					uint8_t a = 0xff;
+					data.emplace_back(uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24));
+				}
+			}
+			assert(data.size() == size*size);
+
+			// make a place for the texture to live on the GPU:
+			textures.emplace_back(rtg.helpers.create_image(
+				VkExtent2D{ .width = size, .height = size }, // size of image
+				VK_FORMAT_R8G8B8A8_SRGB, // how to interpret image data (in this case, SRGB-encoded 8-bit RGBA) - refer to color spaces lecture!
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, // will sample and upload
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // should be device-local
+				Helpers::Unmapped
+			));
+
+			// transfer data:
+			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
+		}
+	}
+
+	{ // make image views for each texture image
+		for (Helpers::AllocatedImage const &image : textures) {
+			// An image view describes how to access an image — Vulkan requires you to create a view before you can use an image in a shader or pipeline.
+			VkImageViewCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.flags = 0,
+				.image = image.handle, // The underlying VkImage handle this view refers to.
+				.viewType = VK_IMAGE_VIEW_TYPE_2D, // Treat the image as a standard 2D texture.
+				.format = image.format, // Use the same format the image was created with (e.g., VK_FORMAT_R8G8B8A8_SRGB).
+				// .components sets swizzling and is fine when zero-initialied; Left zero-initialized, which means no channel swizzling — R maps to R, G to G, etc. (identity mapping). 
+				.subresourceRange{ // Specifies which part of the image to view:
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // this is a color image (not depth/stencil).
+					.baseMipLevel = 0, .levelCount = 1, // only the base mip level (no mipmaps).
+					.baseArrayLayer = 0, .layerCount = 1, // single layer (not an array texture). 
+				},
+			};
+
+			VkImageView image_view = VK_NULL_HANDLE;
+			// creates the view and stores the handle in the local image_view variable:
+			VK( vkCreateImageView(
+				rtg.device,
+				&create_info,
+				nullptr,
+				&image_view
+			) );
+
+			texture_views.emplace_back(image_view);
+		}
+		assert(texture_views.size() == textures.size());
+	}
+
+	{ // make a sampler for the textures
+		VkSamplerCreateInfo create_info {
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.flags = 0,
+			.magFilter = VK_FILTER_NEAREST,
+			.minFilter = VK_FILTER_NEAREST, // When a texture is magnified or minified, use nearest-neighbor filtering (no interpolation, picks the closest texel). The alternative would be VK_FILTER_LINEAR for smoother blending.  
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST, // When selecting between mipmap levels, snap to the nearest level rather than blending between two.
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT, // When texture coordinates go outside [0, 1], the texture repeats (tiles). Other options include clamping or mirroring.
+			.mipLodBias = 0.0f, // No bias applied when selecting mipmap levels.
+			.anisotropyEnable = VK_FALSE, // Anisotropic filtering is disabled. This means maxAnisotropy is ignored.
+			.maxAnisotropy = VK_FALSE, // doesn't matter if anisotropy isn't enabled
+			.compareEnable = VK_FALSE, // Depth comparison is disabled (used for shadow mapping). So compareOp is ignored.
+			.compareOp = VK_COMPARE_OP_ALWAYS, // doesn't matter if compare isn't enabled
+			.minLod = 0.0f, 
+			.maxLod = 0.0f, // Clamps the mipmap level to exactly 0, meaning only the base mip level is ever used. 
+			.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+			.unnormalizedCoordinates = VK_FALSE, // Texture coordinates are in the standard [0, 1] range rather than pixel coordinates.
+		};
+
+		// creates the sampler object and stores the handle in texture_sampler:
+		VK( vkCreateSampler(rtg.device, &create_info, nullptr, &texture_sampler) );
+	}
+		
+	{ // create the texture descriptor pool
+		uint32_t per_texture = uint32_t(textures.size()); // for easier-to-read counting
+
+		std::array< VkDescriptorPoolSize, 1 > pool_sizes{ // tells Vulkan how much memory to reserve in the pool, categorized by type
+			VkDescriptorPoolSize{ // total number of individual descriptors available, categorized by type 
+				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
+				.descriptorCount = 1 * per_texture, // one descriptor per set, one set per workspace
+			},
+		};
+
+		VkDescriptorPoolCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
+			.maxSets = 1 * per_texture, // one set per texture; total number of descriptor sets you can allocate from this pool
+			.poolSizeCount = uint32_t(pool_sizes.size()),
+			.pPoolSizes = pool_sizes.data(), // total number of individual descriptors available, categorized by type   
+		};
+
+		VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &texture_descriptor_pool) );
+	}
+
+	{ // allocate and write the texture descriptor sets
+		VkDescriptorSetAllocateInfo alloc_info {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = texture_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &objects_pipeline.set2_TEXTURE,
+		};
+		texture_descriptors.assign(textures.size(), VK_NULL_HANDLE);
+
+		for (VkDescriptorSet &descriptor_set : texture_descriptors) {
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptor_set) );
+		}
+
+		// write descriptors for textures:
+		std::vector< VkDescriptorImageInfo > infos(textures.size());
+		std::vector< VkWriteDescriptorSet > writes(textures.size());
+
+		for (Helpers::AllocatedImage const &image : textures) {
+			size_t i = &image - &textures[0];
+
+			infos[i] = VkDescriptorImageInfo{
+				.sampler = texture_sampler, // how to sample (filtering, wrapping, etc.)    
+				.imageView = texture_views[i], // which texture image to sample from
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access 
+			};
+			writes[i] = VkWriteDescriptorSet{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = texture_descriptors[i], // which descriptor set to update      
+				.dstBinding = 0, // binding index within that set (matches layout)
+				.dstArrayElement = 0, // starting array index (for arrayed bindings) 
+				.descriptorCount = 1, // updating 1 descriptor  
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
+				.pImageInfo = &infos[i],
+			};
+		}
+
+		vkUpdateDescriptorSets(
+			rtg.device,
+			uint32_t(writes.size()), // descriptorWrites count
+			writes.data(), // descriptorWrites; can I use &writes here //vv No. &writes references to the vector, writes.data() references to the first elem
+			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
+		);
+	}
 }
 
 Tutorial::~Tutorial() {
@@ -237,6 +424,30 @@ Tutorial::~Tutorial() {
 	if (VkResult result = vkDeviceWaitIdle(rtg.device); result != VK_SUCCESS) {
 		std::cerr << "Failed to vkDeviceWaitIdle in Tutorial::~Tutorial [" << string_VkResult(result) << "]; continuing anyway." << std::endl;
 	}
+
+	if (texture_descriptor_pool) {
+		vkDestroyDescriptorPool(rtg.device, texture_descriptor_pool, nullptr);
+		texture_descriptor_pool = nullptr;
+
+		// this also frees the descriptor sets allocated from the pool:
+		texture_descriptors.clear();
+	}
+
+	if (texture_sampler) {
+		vkDestroySampler(rtg.device, texture_sampler, nullptr);
+		texture_sampler = VK_NULL_HANDLE; // why do we still need to set it back to null? what happens if we don't //??
+	}
+
+	for (VkImageView &view : texture_views) {
+		vkDestroyImageView(rtg.device, view, nullptr);
+		view = VK_NULL_HANDLE;
+	}
+	texture_views.clear();
+
+	for (auto &texture : textures) {
+		rtg.helpers.destroy_image(std::move(texture));
+	}
+	textures.clear();
 
 	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it //??
 
@@ -620,7 +831,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				2, // set number (slot 2)   
 				1, &texture_descriptors[inst.texture], // descriptor sets count, ptr (which descriptor set to put in slot 2)
 				0, nullptr // dynamic offsets count, ptr
-			)
+			);
 
 			vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index);
 		}
@@ -736,6 +947,7 @@ void Tutorial::update(float dt) {
 					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL, 
 					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL, // this is the normals? //??
 				},
+				.texture = 1,
 			});
 		}
 		{ //torus translated -x by one unit and rotated CCW around +y: TODO: understand this

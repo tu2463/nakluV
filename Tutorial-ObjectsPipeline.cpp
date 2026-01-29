@@ -55,7 +55,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 	}
 
 	{ // create pipeline layout; why do we need blocks like this in C++ //??
-		std::array< VkDescriptorSetLayout, 2 > layouts{
+		std::array< VkDescriptorSetLayout, 3 > layouts{
 			set1_Transforms, //we'd like to say "VK_NULL_HANDLE" here, but that's not valid without an extension - what does this mean //?/
 			set1_Transforms,
 			set2_TEXTURE,
@@ -190,9 +190,9 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 		set1_Transforms = VK_NULL_HANDLE;
 	}
 
-	if (set0_TEXTURE != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(rtg.device, set0_TEXTURE, nullptr);
-		set0_TEXTURE = VK_NULL_HANDLE;
+	if (set2_TEXTURE != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set2_TEXTURE, nullptr);
+		set2_TEXTURE = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {
