@@ -138,7 +138,8 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	);
 
 	// copy image data into the source buffer
-	std::memcpy(transfer_src.allocation.data(), &data, size);
+	// Use *data*, not *&data*, because The function signature shows data is already a pointer (void const *data). The bug is using &data which takes the address of the pointer variable itself (on the stack) instead of the data it points to.  
+	std::memcpy(transfer_src.allocation.data(), data, size);
 
 	// begin recording a command buffer
 	VK( vkResetCommandBuffer(transfer_command_buffer, 0) );

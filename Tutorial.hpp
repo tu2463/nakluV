@@ -170,6 +170,8 @@ struct Tutorial : RTG::Application {
 
 	std::vector< LinesPipeline::Vertex > lines_vertices;
 
+	ObjectsPipeline::World world;
+
 	struct ObjectInstance {
 		ObjectVertices vertices;
 		ObjectsPipeline::Transform transform;

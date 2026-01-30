@@ -643,6 +643,22 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.Camera_src.handle, workspace.Camera.handle, 1, &copy_region);
 	}
 
+	{ // upload world info:
+		assert(workspace.World_src.size == sizeof(world)); // don't think this is correct //??
+
+		// host-side copy into World_src:
+		memcpy(workspace.World_src.allocation.data(), &world, sizeof(world));
+
+		// add device-side copy from World_src -> World:
+		assert(workspace.World_src.size == workspace.World.size);
+		VkBufferCopy copy_region{
+			.srcOffset = 0,
+			.dstOffset = 0,
+			.size = workspace.World_src.size,
+		};
+		vkCmdCopyBuffer(workspace.command_buffer, workspace.World_src.handle, workspace.World.handle, 1, &copy_region);
+	}
+
 	if (!object_instances.empty()) { // upload object transforms:
 		//[re-]allocate object buffers if needed:
 		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
@@ -847,15 +863,16 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			);
 		}
 
-		{ // bind Transforms descriptor set:
-			std::array< VkDescriptorSet, 1 > descriptor_sets{
+		{ // bind World and Transforms descriptor set:
+			std::array< VkDescriptorSet, 2 > descriptor_sets{
+				workspace.World_descriptors, // 0: World
 				workspace.Transforms_descriptors, // 1: Transforms
 			};
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer, // command buffer
 				VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
 				objects_pipeline.layout, // pipeline layout
-				1, // our descriptor set got bound as set 1, not set 0.
+				0, // first set; note that before creating the world descriptor set, our descriptor set got bound as set 1, not set 0.
 				uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
 				0, nullptr // dynamic offsets count, ptr
 			);
@@ -910,6 +927,28 @@ void Tutorial::update(float dt) {
 			0.0f, 0.0f, 0.5f, //target
 			0.0f, 0.0f, 1.0f //up
 		);
+	}
+
+	{ // static sun and sky
+		// Direction: (0, 0, 1) — pointing straight up along the Z-axis 
+		world.SKY_DIRECTION.x = 0.0f;
+		world.SKY_DIRECTION.y = 0.0f;
+		world.SKY_DIRECTION.z = 1.0f;
+
+		// Energy: (0.1, 0.1, 0.2) — a dim, slightly blue tint (the blue channel is twice as strong as red/green)    
+		world.SKY_ENERGY.r = 0.1f;
+		world.SKY_ENERGY.g = 0.1f;
+		world.SKY_ENERGY.b = 0.2f;
+
+		// Direction: (6/23, 13/23, 18/23) ≈ (0.26, 0.57, 0.78) — a normalized vector pointing roughly up and to the side
+		world.SUN_DIRECTION.x = 6.0f / 23.0f;
+		world.SUN_DIRECTION.y = 13.0f / 23.0f;
+		world.SUN_DIRECTION.z = 18.0f / 23.0f;
+
+		// Energy: (1.0, 1.0, 0.9) — bright white with a slight warm/yellow tint (red and green at full, blue slightly reduced)  
+		world.SUN_ENERGY.r = 1.0f;
+		world.SUN_ENERGY.g = 1.0f;
+		world.SUN_ENERGY.b = 0.9f;
 	}
 
 	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
