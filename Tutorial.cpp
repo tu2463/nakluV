@@ -29,7 +29,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		std::array< VkDescriptorPoolSize, 2 > pool_sizes{
 			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				.descriptorCount = 1 * per_workspace, // one descriptor per set, one set per workspace
+				.descriptorCount = 2 * per_workspace, // 1 descriptor per set, 2 set per workspace (world, camera)
 			},
 			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -40,7 +40,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = 2 * per_workspace, // two sets per workspace (for uniform buffer and storage buffer)
+			.maxSets = 3 * per_workspace, // 3 sets per workspace (2 uniform buffer for world and camera and 1 storage buffer for transforms)
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(),
 		};
@@ -77,6 +77,30 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Camera_descriptors) );
 		}
 
+		workspace.World_src = rtg.helpers.create_buffer(
+			sizeof(ObjectsPipeline::World),
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // going to have GPU copy from this memory
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (The CPU can see this memory), coherent (no special sync needed, CPU writes are automatically visible to GPU)
+			Helpers::Mapped // get a pointer to memory
+		);
+		workspace.World = rtg.helpers.create_buffer(
+			sizeof(ObjectsPipeline::World),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as a uniform buffer, also going to have GPU copy into this memory
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+			Helpers::Unmapped // don't get a pointer to memory
+		);
+
+		{ //allocate descriptor set for World descriptor
+			VkDescriptorSetAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = descriptor_pool,
+				.descriptorSetCount = 1,
+				.pSetLayouts = &objects_pipeline.set0_World,
+			};
+
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.World_descriptors) );
+		}
+
 		{ //allocate descriptor set for Transforms descriptor
 			VkDescriptorSetAllocateInfo alloc_info{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -96,15 +120,30 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 				.range = workspace.Camera.size,
 			};
 
-			std::array< VkWriteDescriptorSet, 1 > writes{
+			VkDescriptorBufferInfo World_info{
+				.buffer = workspace.World.handle,
+				.offset = 0,
+				.range = workspace.World.size,
+			};
+
+			std::array< VkWriteDescriptorSet, 2 > writes{
 				VkWriteDescriptorSet{
 					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-					.dstSet = workspace.Camera_descriptors,
+					.dstSet = workspace.Camera_descriptors, // Which descriptor set to update  
+					.dstBinding = 0, // Which binding slot (matches shader)
+					.dstArrayElement = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+					.pBufferInfo = &Camera_info, // The actual buffer to bind 
+				},
+				VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = workspace.World_descriptors,
 					.dstBinding = 0,
 					.dstArrayElement = 0,
 					.descriptorCount = 1,
 					.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-					.pBufferInfo = &Camera_info,
+					.pBufferInfo = &World_info,
 				},
 			};
 
@@ -471,6 +510,15 @@ Tutorial::~Tutorial() {
 		if (workspace.Camera.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.Camera));
 		}
+		// Camera_descriptors freed when pool is destroyed
+
+		if (workspace.World_src.handle != VK_NULL_HANDLE)  {
+			rtg.helpers.destroy_buffer(std::move(workspace.World_src));
+		}
+		if (workspace.World.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(workspace.World));
+		}
+		// World_descriptors freed when pool is destroyed
 
 		if (workspace.Transforms.handle != VK_NULL_HANDLE)  {
 			rtg.helpers.destroy_buffer(std::move(workspace.Transforms));

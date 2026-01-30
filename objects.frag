@@ -2,7 +2,7 @@
 
 layout(set=0, binding=0, std140) uniform World {
     vec3 SKY_DIRECTION;
-    vec3 SKY_ENERGY; // energy supplie by sky to a surface patch with normal = SKY_DIRECTION
+    vec3 SKY_ENERGY; // energy supplied by sky to a surface patch with normal = SKY_DIRECTION
     vec3 SUN_DIRECTION;
     vec3 SUN_ENERGY; // energy supplied by sun to a surface patch with normal = SUN_DIRECTION
 };
