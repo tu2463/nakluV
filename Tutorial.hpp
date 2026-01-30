@@ -138,7 +138,7 @@ struct Tutorial : RTG::Application {
 		uint32_t first = 0;
 		uint32_t count = 0;
 	};
-	ObjectVertices plane_vertices;
+	ObjectVertices sphere_vertices;
 	ObjectVertices torus_vertices;
 
 	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
