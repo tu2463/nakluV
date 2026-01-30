@@ -252,7 +252,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	}
 
 	// end and submit the command buffer:
-	VK( vkEndCommandbuffer(transfer_command_buffer) );
+	VK( vkEndCommandBuffer(transfer_command_buffer) );
 
 	VkSubmitInfo submit_info{ // what does this format mean//??
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
