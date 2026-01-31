@@ -31,6 +31,15 @@ struct Helpers {
 		Mapped = 1,
 	};
 
+	// allocate a block of requested size and alignment from a memory with the given type index:
+	Allocation allocate(VkDeviceSize size, VkDeviceSize alignment, uint32_t memory_type_index, MapFlag map = Unmapped);
+
+	// allocate a block that works for a given VkMemoryREquirements and VkMemoryPropertyFlags:
+	Allocation allocate(VkMemoryRequirements const &requirements, VkMemoryPropertyFlags properties, MapFlag map);
+
+	// free an allocated block:
+	void free(Allocation &&allocation);
+
 	//specializations that also create a buffer or image (respectively):
 	struct AllocatedBuffer {
 		VkBuffer handle = VK_NULL_HANDLE;
