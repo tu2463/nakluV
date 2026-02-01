@@ -123,8 +123,41 @@ void Helpers::destroy_buffer(AllocatedBuffer &&buffer) {
 
 
 Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map) {
+	// 1. create the VkImage
 	AllocatedImage image;
-	refsol::Helpers_create_image(rtg, extent, format, tiling, usage, properties, (map == Mapped), &image);
+	// refsol::Helpers_create_image(rtg, extent, format, tiling, usage, properties, (map == Mapped), &image);
+	image.extent = extent;
+	image.format = format;
+
+	VkImageCreateInfo create_info{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.imageType = VK_IMAGE_TYPE_2D,
+		.format = format,
+		.extent{
+			.width = extent.width,
+			.height = extent.height,
+			.depth = 1
+		},
+		.mipLevels = 1,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = tiling,
+		.usage = usage,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE, //  the buffer/image is owned by one queue family at a time.
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, // if you wanted to specify images directly by writing data to mapped memory (instead of copying from a buffer) you'd instead set this to VK_IMAGE_LAYOUT_PREINITIALIZED and the tiling to VK_IMAGE_TILING_LINEAR, which together would guarantee a known image layout.
+	};
+
+	VK( vkCreateImage(rtg.deivce, &create_info, nullptr, &image.handle) );
+
+	// 2. ask how much memory it needs
+	VkMemoryRequirements req;
+	vkGetImageMemoryRequirements(rtg.device, image.handle, &req); // Strangely enough, vkGetBufferMemoryRequirements is one of the very rare Vulkan functions that cannot return an error. So we don't wrap it with VK()
+
+	// 3. create the memory
+	image.allocation = allocate(req, properties, map);
+
+	// 4. bind the memory
+	VK( vkBindImageMemory(rtg.device, image.handle, image.allocation.handle, image.allocation.offset) );
 	return image;
 }
 
