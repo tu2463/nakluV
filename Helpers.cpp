@@ -42,6 +42,12 @@ Helpers::Allocation::~Allocation() {
 
 //----------------------------
 
+Helpers::Allocation Helpers::allocate(VkMemoryRequirements const &req, VkMemoryPropertyFlags properties, MapFlag map) {
+	return allocate(req.size, req.alignment, find_memory_type(req.memoryTypeBits, properties), map);
+}
+
+//----------------------------
+
 Helpers::AllocatedBuffer Helpers::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map) {
 	AllocatedBuffer buffer;
 	// refsol::Helpers_create_buffer(rtg, size, usage, properties, (map == Mapped), &buffer);
@@ -70,7 +76,12 @@ Helpers::AllocatedBuffer Helpers::create_buffer(VkDeviceSize size, VkBufferUsage
 }
 
 void Helpers::destroy_buffer(AllocatedBuffer &&buffer) {
-	refsol::Helpers_destroy_buffer(rtg, &buffer);
+	// refsol::Helpers_destroy_buffer(rtg, &buffer);
+	vkDestroyBuffer(rtg.device, buffer.handle, nullptr); // how to understand the use of & here //??
+	buffer.handle = VK_NULL_HANDLE;
+	buffer.size = 0;
+
+	this->free(std::move(buffer.allocation)); // pass the memory allocation to our free function to take care of releasing it
 }
 
 
