@@ -524,7 +524,7 @@ Tutorial::~Tutorial() {
 			vkFreeCommandBuffers(rtg.device, command_pool, 1, &workspace.command_buffer);
 			workspace.command_buffer = VK_NULL_HANDLE;
 		}
-		
+
 		if (workspace.lines_vertices_src.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.lines_vertices_src));
 		}
@@ -935,8 +935,38 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	//end recording:
 	VK( vkEndCommandBuffer(workspace.command_buffer ));
 	
-	//submit `workspace.command buffer` for the GPU to run:
-	refsol::Tutorial_render_submit(rtg, render_params, workspace.command_buffer);
+	{ //submit `workspace.command buffer` for the GPU to run:
+		// refsol::Tutorial_render_submit(rtg, render_params, workspace.command_buffer)
+		// Now, we've seen vkQueueSubmit before, but this one is a bit unique in that it needs to wait on and signal semaphores as well as signal a fence.
+		std::array< VkSemaphore, 1 > wait_semaphores{ // what is semaphores //vv  used for synchronizing work between on-GPU workloads.
+			render_params.image_available // swapchain signals this when an image is ready to render to  
+		};
+		std::array< VkPipelineStageFlags, 1 > wait_stages{
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+		};
+		static_assert(wait_semaphores.size() == wait_stages.size(), "every semaphore needs a stage");
+
+		std::array< VkSemaphore, 1 > signal_semaphores{
+			// The work that waits on this semaphore will be submitted by the window system interface layer after we finish the render call
+			render_params.image_done // your render signals this  after the rendering work in this batch is done
+		};
+		VkSubmitInfo submit_info{
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			.waitSemaphoreCount = uint32_t(wait_semaphores.size()),
+			.pWaitSemaphores = wait_semaphores.data(), // why use array.data() instead of &array here //vv wait_semaphores.data() is VkSemaphore* type; &wait_semaphores is std::array<VkSemaphore,1>* type 
+
+			// tells Vulkan: Don't let any submitted work reach the color attachment output stage (where fragment shaders write to the framebuffer) until image_available is signaled.
+			// Operations before the color attachment stage (like copies, vertex processing) can start running immediately, even while the image is still being presented! 
+			// Only when GPU work reaches the point of actually writing colors does it have to wait for the semaphore:
+			.pWaitDstStageMask = wait_stages.data(),
+			.commandBufferCount = 1,
+			.pCommandBuffers = &workspace.command_buffer,
+			.signalSemaphoreCount = uint32_t(signal_semaphores.size()),
+			.pSignalSemaphores = signal_semaphores.data()
+		}
+
+		VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, render_params.workspace_available) ); // what's a VkFence (render_params.workspace_available) //??
+	}
 }
 
 
