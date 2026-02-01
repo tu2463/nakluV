@@ -2,7 +2,6 @@
 
 #include "RTG.hpp"
 #include "VK.hpp"
-#include "refsol.hpp"
 
 #include <vulkan/utility/vk_format_utils.h> // useful for byte counting
 
@@ -147,7 +146,7 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, // if you wanted to specify images directly by writing data to mapped memory (instead of copying from a buffer) you'd instead set this to VK_IMAGE_LAYOUT_PREINITIALIZED and the tiling to VK_IMAGE_TILING_LINEAR, which together would guarantee a known image layout.
 	};
 
-	VK( vkCreateImage(rtg.deivce, &create_info, nullptr, &image.handle) );
+	VK( vkCreateImage(rtg.device, &create_info, nullptr, &image.handle) );
 
 	// 2. ask how much memory it needs
 	VkMemoryRequirements req;
@@ -414,8 +413,8 @@ VkFormat Helpers::find_image_format(std::vector< VkFormat > const &candidates, V
 			// If using optimal tiling, check optimal features instead.
 			return format;
 		}
-		throw std::runtime_error("No supported format matches request");
 	}
+	throw std::runtime_error("No supported format matches request");
 }
 
 VkShaderModule Helpers::create_shader_module(uint32_t const *code, size_t bytes) const {
