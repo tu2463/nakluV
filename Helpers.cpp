@@ -354,8 +354,28 @@ uint32_t Helpers::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags f
 	throw std::runtime_error("No suitable memory type found.");
 }
 
+// we'll need this when we get to creating swapchain-related resources.
+// The caller asks for features they want (as a logical or of VkFormatFeatureFlagBits), and 
+// the function looks for formats (among the candidates the caller requests) that support those features.
+// This code finds a supported image format from a list of candidates. Not all GPUs support all formats for all uses, so you must check.   
 VkFormat Helpers::find_image_format(std::vector< VkFormat > const &candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const {
-	return refsol::Helpers_find_image_format(rtg, candidates, tiling, features);
+	// return refsol::Helpers_find_image_format(rtg, candidates, tiling, features);
+
+	for (VkFormat format : candidates) { // Loop through your preferred formats
+		VkFormatProperties props;
+		vkGetPhysicalDeviceFormatProperties(rtg.physical_device, format, &props);
+		// by now, The props struct contains:                                                                               
+		// - linearTilingFeatures — what's supported for linear tiling                                              
+		// - optimalTilingFeatures — what's supported for optimal tiling 
+		if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+			// If using linear tiling, check if all requested features are supported.
+			return format;
+		} else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+			// If using optimal tiling, check optimal features instead.
+			return format;
+		}
+		throw std::runtime_error("No supported format matches request");
+	}
 }
 
 VkShaderModule Helpers::create_shader_module(uint32_t const *code, size_t bytes) const {
