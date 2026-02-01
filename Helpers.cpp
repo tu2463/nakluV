@@ -42,8 +42,45 @@ Helpers::Allocation::~Allocation() {
 
 //----------------------------
 
+Helpers::Allocation Helpers::allocate(VkDeviceSize size, VkDeviceSize alignment, uint32_t memory_type_index, MapFlag map) {
+	Helpers::Allocation allocation;
+
+	VkMemoryAllocateInfo alloc_info{
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.allocationSize = size,
+		.memoryTypeIndex = memory_type_index,
+	};
+
+	VK( vkAllocateMemory( rtg.device, &alloc_info, nullptr, &allocation.handle) );
+
+	allocation.size = size;
+	allocation.offset = 0;
+
+	if (map == Mapped) { // mapping the memory into the host address space if requested:
+		VK( vkMapMemory(rtg.device, allocation.handle, 0, allocation.size, 0, &allocation.mapped) );
+	}
+
+	return allocation;
+}
+
+// This version of our allocate function passes the work of allocating the memory to the other overload of the function, 
+// and the work of finding a memory type in the memoryTypeBits bit set that also has the memory properties in properties to a function called find_memory_type
+// The conveneince overload unpacks the Vulkan structs and calls the low-level overload
 Helpers::Allocation Helpers::allocate(VkMemoryRequirements const &req, VkMemoryPropertyFlags properties, MapFlag map) {
 	return allocate(req.size, req.alignment, find_memory_type(req.memoryTypeBits, properties), map);
+}
+
+void Helpers::free(Helpers::Allocation &&allocation) {
+	if (allocation.mapped != nullptr) {
+		vkUnmapMemory(rtg.device, allocation.handle);
+		allocation.mapped = nullptr;
+	}
+
+	vkFreeMemory(rtg.device, allocation.handle, nullptr);
+
+	allocation.handle = VK_NULL_HANDLE;
+	allocation.offset = 0;
+	allocation.size = 0;
 }
 
 //----------------------------
@@ -299,10 +336,23 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	VK( vkQueueWaitIdle(rtg.graphics_queue) );
 
 	// destroy the source buffer:
-	destroy_buffer(std::move(transfer_src)); // what does move() mean //??
+	destroy_buffer(std::move(transfer_src)); // what does move() mean //vv transfer ownership to the destroy function
 }
 
 //----------------------------
+
+uint32_t Helpers::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags flags) const { // what does this const mean //??
+	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+		VkMemoryType const &type = memory_properties.memoryTypes[i]; // walks through each memory type
+		// from the property flags, 
+		// attempt to find one that both appears in the type_filter bit-set and 
+		// supports all the requested flags.
+		if ((type_filter & (1 << i)) != 0 && (type.propertyFlags & flags) == flags) {
+			return i;
+		}
+	}
+	throw std::runtime_error("No suitable memory type found.");
+}
 
 VkFormat Helpers::find_image_format(std::vector< VkFormat > const &candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const {
 	return refsol::Helpers_find_image_format(rtg, candidates, tiling, features);
@@ -345,6 +395,22 @@ void Helpers::create() {
 		.commandBufferCount = 1,
 	};
 	VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &transfer_command_buffer) );
+
+	vkGetPhysicalDeviceMemoryProperties(rtg.physical_device, &memory_properties);
+
+	if (rtg.configuration.debug) {
+		std::cout << "Memory types:\n";
+		for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+			VkMemoryType const &type = memory_properties.memoryTypes[i];
+			std::cout << " [" << i << "] heap " << type.heapIndex << ", flags: " << string_VkMemoryPropertyFlags(type.propertyFlags) << '\n';
+		}
+		std::cout << "Memory heaps:\n";
+		for (uint32_t i = 0; i < memory_properties.memoryHeapCount; ++i) {
+			VkMemoryHeap const &heap = memory_properties.memoryHeaps[i];
+			std::cout << " [" << i << "] " << heap.size << " bytes, flags: " << string_VkMemoryHeapFlags(heap.flags) << '\n';
+		}
+		std::cout.flush(); //?? what is flush?
+	}
 }
 
 void Helpers::destroy() {

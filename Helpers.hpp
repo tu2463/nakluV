@@ -32,9 +32,11 @@ struct Helpers {
 	};
 
 	// allocate a block of requested size and alignment from a memory with the given type index:
+	// Low-level (takes raw values). Use this When you already know the exact size, alignment, and memory type
 	Allocation allocate(VkDeviceSize size, VkDeviceSize alignment, uint32_t memory_type_index, MapFlag map = Unmapped);
 
 	// allocate a block that works for a given VkMemoryREquirements and VkMemoryPropertyFlags:
+	// Convenience wrapper (takes Vulkan structs). Use this when you have a VkMemoryRequirements from Vulkan (common case)      
 	Allocation allocate(VkMemoryRequirements const &requirements, VkMemoryPropertyFlags properties, MapFlag map);
 
 	// free an allocated block:
@@ -74,6 +76,10 @@ struct Helpers {
 	VkCommandBuffer transfer_command_buffer = VK_NULL_HANDLE;
 	//-----------------------
 	//Misc utilities:
+
+	// for selecting memory types (used by allocate, above):
+	VkPhysicalDeviceMemoryProperties memory_properties{};
+	uint32_t find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags flags) const;
 
 	//for selecting image formats:
 	VkFormat find_image_format(std::vector< VkFormat > const &candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const;
