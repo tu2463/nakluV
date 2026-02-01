@@ -140,7 +140,7 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 		},
 		.mipLevels = 1,
 		.arrayLayers = 1,
-		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.samples = VK_SAMPLE_COUNT_1_BIT, // No multisampling
 		.tiling = tiling,
 		.usage = usage,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE, //  the buffer/image is owned by one queue family at a time.
@@ -162,7 +162,14 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 }
 
 void Helpers::destroy_image(AllocatedImage &&image) {
-	refsol::Helpers_destroy_image(rtg, &image);
+	// refsol::Helpers_destroy_image(rtg, &image);
+	vkDestroyImage(rtg.device, image.handle, nullptr);
+
+	image.handle = VK_NULL_HANDLE;
+	image.extent = VkExtent2D{.width = 0, .height = 0};
+	image.format = VK_FORMAT_UNDEFINED;
+
+	this->free(std::move(image.allocation));
 }
 
 //----------------------------
