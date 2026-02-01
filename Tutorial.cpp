@@ -50,7 +50,16 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 
 	workspaces.resize(rtg.workspaces.size());
 	for (Workspace &workspace : workspaces) {
-		refsol::Tutorial_constructor_workspace(rtg, command_pool, &workspace.command_buffer);
+		// refsol::Tutorial_constructor_workspace(rtg, command_pool, &workspace.command_buffer);
+		{ // allocate command buffer
+			VkCommandBufferAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+				.commandPool = command_pool,
+				.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, // it can be submitted directly to a queue
+				.commandBufferCount = 1,
+			};
+			VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &workspace.command_buffer) );
+		}
 
 		workspace.Camera_src = rtg.helpers.create_buffer(
 			sizeof(LinesPipeline::Camera),
@@ -510,8 +519,12 @@ Tutorial::~Tutorial() {
 	}
 
 	for (Workspace &workspace : workspaces) {
-		refsol::Tutorial_destructor_workspace(rtg, command_pool, &workspace.command_buffer);
-
+		// refsol::Tutorial_destructor_workspace(rtg, command_pool, &workspace.command_buffer);
+		if (workspace.command_buffer != VK_NULL_HANDLE) {
+			vkFreeCommandBuffers(rtg.device, command_pool, 1, &workspace.command_buffer);
+			workspace.command_buffer = VK_NULL_HANDLE;
+		}
+		
 		if (workspace.lines_vertices_src.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.lines_vertices_src));
 		}
