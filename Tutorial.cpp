@@ -27,7 +27,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT //  an image view can be used as a framebuffer depth/stencil attachment and as an input attachment.
 	);
 
-	{ // create remder pass 
+	{ // create render pass 
 		// attachments
 		std::array< VkAttachmentDescription, 2 > attachments{
 			VkAttachmentDescription{ // color attachment:
@@ -111,6 +111,15 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			.dependencyCount = uint32_t(dependencies.size()),
 			.pDependencies = dependencies.data(),
 		};
+	}
+
+	{ //create command pool
+		VkCommandPoolCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, // Each command buffer can be reset on its own
+			.queueFamilyIndex = rtg.graphics_queue_family.value(),
+		};
+		VK( vkCreateCommandPool(rtg.device, &create_info, nullptr, &command_pool) );
 	}
 
 	background_pipeline.create(rtg, render_pass, 0);
@@ -663,8 +672,13 @@ Tutorial::~Tutorial() {
 	objects_pipeline.destroy(rtg);
 
 	// refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
-	//TODO: destroy command pool
-	
+	// destroy command pool:
+	if (command_pool != VK_NULL_HANDLE) {
+		vkDestroyCommandPool(rtg.device, command_pool, nullptr);
+		command_pool = VK_NULL_HANDLE;
+	}
+
+	// destroy render pass:
 	if (render_pass != VK_NULL_HANDLE) {
 		vkDestroyRenderPass(rtg.device, render_pass, nullptr);
 		render_pass = VK_NULL_HANDLE;
@@ -673,7 +687,14 @@ Tutorial::~Tutorial() {
 
 void Tutorial::on_swapchain(RTG &rtg_, RTG::SwapchainEvent const &swapchain) {
 	//[re]create framebuffers:
-	refsol::Tutorial_on_swapchain(rtg, swapchain, depth_format, render_pass, &swapchain_depth_image, &swapchain_depth_image_view, &swapchain_framebuffers);
+	// refsol::Tutorial_on_swapchain(rtg, swapchain, depth_format, render_pass, &swapchain_depth_image, &swapchain_depth_image_view, &swapchain_framebuffers);
+	//TODO: clean up existing framebuffers
+
+	//TODO: allocate depth image for framebuffers to share
+
+	//TODO: create an image view of the depth image
+
+	//TODO: create framebuffers pointing to each swapchain image view and the shared depth image view
 }
 
 void Tutorial::destroy_framebuffers() {
