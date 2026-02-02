@@ -150,21 +150,47 @@ RTG::~RTG() {
 
 
 void RTG::recreate_swapchain() {
-	refsol::RTG_recreate_swapchain(
-		configuration.debug,
-		device,
-		physical_device,
-		surface,
-		surface_format,
-		present_mode,
-		graphics_queue_family,
-		present_queue_family,
-		&swapchain,
-		&swapchain_extent,
-		&swapchain_images,
-		&swapchain_image_views,
-		&swapchain_image_dones
-	);
+	// refsol::RTG_recreate_swapchain(
+	// 	configuration.debug,
+	// 	device,
+	// 	physical_device,
+	// 	surface,
+	// 	surface_format,
+	// 	present_mode,
+	// 	graphics_queue_family,
+	// 	present_queue_family,
+	// 	&swapchain,
+	// 	&swapchain_extent,
+	// 	&swapchain_images,
+	// 	&swapchain_image_views,
+	// 	&swapchain_image_dones
+	// );
+
+	//clean up swapchain if it already exists:
+	if (!swapchain_images.empty()) {
+		destroy_swapchain();
+	}
+
+	//determine size, image count, and transform (capabilities.currentTransform) for swapchain:
+	// size:
+	VkSurfaceCapabilitiesKHR capabilities;
+	VK( vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities) );
+	swapchain_extent = capabilities.currentExtent;
+
+	// image count:
+	// set to one more than the minimum supported, but clamp it to the maximum supported count
+	uint32_t requested_count = capabilities.minImageCount + 1; // add one more to allow some amount of parallelism in rendering.
+	if (capabilities.maxImageCount != 0) {
+		requested_count = std::min(capabilities.maxImageCount, requested_count);
+	}
+
+	//TODO: make the swapchain
+
+	//TODO: get the swapchain images
+
+	//TODO: make image views
+
+	//TODO: make image done semaphores
 }
 
 
