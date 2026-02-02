@@ -54,13 +54,13 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 
 		// subpass
 		VkAttachmentReference color_attachment_ref{
-			.attachment = 1,
+			.attachment = 0,
 			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		};
 
 		VkAttachmentReference depth_attachment_ref{
-			.attachment = 0,
-			.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.attachment = 1,
+			.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 		};
 
 		VkSubpassDescription subpass{
@@ -111,6 +111,8 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 			.dependencyCount = uint32_t(dependencies.size()),
 			.pDependencies = dependencies.data(),
 		};
+
+		VK( vkCreateRenderPass(rtg.device, &create_info, nullptr, &render_pass) );
 	}
 
 	{ //create command pool
@@ -745,7 +747,20 @@ void Tutorial::on_swapchain(RTG &rtg_, RTG::SwapchainEvent const &swapchain) {
 }
 
 void Tutorial::destroy_framebuffers() {
-	refsol::Tutorial_destroy_framebuffers(rtg, &swapchain_depth_image, &swapchain_depth_image_view, &swapchain_framebuffers);
+	// refsol::Tutorial_destroy_framebuffers(rtg, &swapchain_depth_image, &swapchain_depth_image_view, &swapchain_framebuffers);
+
+	for (VkFramebuffer &framebuffer : swapchain_framebuffers) {
+		assert(framebuffer != VK_NULL_HANDLE);
+		vkDestroyFramebuffer(rtg.device, framebuffer, nullptr);
+		framebuffer = VK_NULL_HANDLE;
+	}
+	swapchain_framebuffers.clear();
+
+	assert(swapchain_depth_image_view != VK_NULL_HANDLE);
+	vkDestroyImageView(rtg.device, swapchain_depth_image_view, nullptr);
+	swapchain_depth_image_view = VK_NULL_HANDLE;
+
+	rtg.helpers.destroy_image(std::move(swapchain_depth_image));
 }
 
 
@@ -1131,7 +1146,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			.pCommandBuffers = &workspace.command_buffer,
 			.signalSemaphoreCount = uint32_t(signal_semaphores.size()),
 			.pSignalSemaphores = signal_semaphores.data()
-		}
+		};
 
 		VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, render_params.workspace_available) ); // what's a VkFence (render_params.workspace_available) //??
 	}
