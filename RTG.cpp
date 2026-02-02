@@ -226,9 +226,50 @@ void RTG::recreate_swapchain() {
 		VK( vkGetSwapchainImagesKHR(device, swapchain, &count, swapchain_images.data()) );
 	}
 
-	//TODO: make image views
+	// Vulkan code that accesses images generally does so through an image view (handle type: VkImageView). 
+	// So we might as well create image views for all our swapchain images here:
+	swapchain_image_views.assign(swapchain_images.size(), VK_NULL_HANDLE);
+	for (size_t i = 0; i < swapchain_images.size(); ++i) {
+		VkImageViewCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = swapchain_images[i],
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = surface_format.format,
+			.components{
+				.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+				.a = VK_COMPONENT_SWIZZLE_IDENTITY
+			},
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+		};
+		VK( vkCreateImageView(device, &create_info, nullptr, &swapchain_image_views[i]) );
+	}
 
-	//TODO: make image done semaphores
+	// every rendering to a swapchain image will need a semaphore to communicate that the rendering has finished to the windowing system, 
+	// so it can wait before presenting the image. 
+	// Because there is no elegant way to reclaim these semaphores other than waiting for a given swapchain image to be re-acquired, 
+	// we need to allocate one such semaphore for each swapchain image:
+	{ //create semaphores for waiting on each image to be done:
+		VkSemaphoreCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		};
+
+		swapchain_image_dones.assign(swapchain_images.size(), VK_NULL_HANDLE);
+		for (size_t i = 0; i < swapchain_image_dones.size(); ++i) {
+			VK( vkCreateSemaphore(device, &create_info, nullptr, &swapchain_image_dones[i]) );
+		}
+	}
+
+	if (configuration.debug) {
+		std::cout << "Swapchain is now " << swapchain_images.size() << " images of size " << swapchain_extent.width << "x" << swapchain_extent.height << "." << std::endl;
+	}
 }
 
 
