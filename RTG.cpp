@@ -510,6 +510,16 @@ retry:
 			throw std::runtime_error("Failed to acquire swapchain image (" + std::string(string_VkResult(result)) + ")!");
 		}
 
+		//call render function: //?? is this the correct place for it
+		// assembles a RenderParams parameter structure and hands it to the application:
+		application.render(*this, RenderParams{
+			.workspace_index = workspace_index,
+			.image_index = image_index,
+			.image_available = workspaces[workspace_index].image_available,
+			.image_done = swapchain_image_dones[image_index],
+			.workspace_available = workspaces[workspace_index].workspace_available,
+		});
+
 		//TODO: queue rendering work
 
 		//TODO: present image (resize swapchain if needed)
