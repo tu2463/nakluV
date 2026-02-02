@@ -487,7 +487,28 @@ void RTG::run(Application &application) {
 			VK( vkResetFences(device, 1, workspaces[workspace_index].workspace_available) );
 		}
 
-		//TODO: acquire an image (resize swapchain if needed)
+		uint32_t image_index = -1U;
+		// acquire an image (resize swapchain if needed):
+retry:          
+		// ask the swapchain for the next image index - note careful return handling:
+		if (VKResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, workspaces[workspace_index].image_available, VK_NULL_HANDLE, &image_index); 
+			result == VK_ERROR_OUT_OF_DATE_KHR) {
+			// if the swapchain is out-of-date, 
+			std::cerr << "Recreating swapchain because vkAquireNextImageKHR returned" << string_VkResult(result) << "." << std::endl; // what is std::cerr //??
+			
+			// recreate it.
+			// These two functions work together when the swapchain becomes invalid (e.g., window resize):  
+			recreate_swapchain(); // Destroys the old swapchain and creates a new one with updated parameters. manages RTG's internal Vulkan resources   
+			on_swapchain(); // Calls the application's on_swapchain method to let it recreate any resources dependent on the swapchain (like framebuffers). manages Application's dependent resources
+
+			goto retry; // and run the loop again
+		} else if (result == VK_SUBOPTIMAL_KHR) {
+			// if the swapchain is suboptimal, render to it and recreate it later:
+			std::cerr << "Suboptimal swapchain format - ignoring for the moment." << std::endl;
+		} else if (result != VK_SUCCESS) {
+			// other non-success results are genuine errors:
+			throw std::runtime_error("Failed to acquire swapchain image (" + std::string(string_VkResult(result)) + ")!");
+		}
 
 		//TODO: queue rendering work
 
