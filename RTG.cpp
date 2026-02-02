@@ -426,7 +426,16 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 // the "harness" that connects an RTG::Application (like Tutorial) to the windowing system and GPU.
 void RTG::run(Application &application) {
 	// refsol::RTG_run(*this, application);
-	//TODO: initial on_swapchain
+	// initial on_swapchain:
+	// give the application the chance to create framebuffers for the current state of the swapchain.
+	auto on_swapchain = [&, this]() {
+		application.on_swapchain(*this, SwapchainEvent{
+			.extent = swapchain_extent, 
+			.images = swapchain_images,
+			.image_views = swapchain_image_views,
+		});
+	};
+	on_swapchain();
 
 	// setup event handling
 	std::vector< InputEvent > event_queue;
@@ -462,7 +471,27 @@ void RTG::run(Application &application) {
 
 		}
 
-		//TODO: render handling (with on_swapchain as needed)
+		// render handling (with on_swapchain as needed):
+		uint32_t workspace_index;
+		{
+			// acquire a workspace i.e. getting a set of buffers that aren't being used in a current rendering operation
+			// How do we know a workspace isn't being used? Each workspace has an associated workspace_available fence, which is signaled when the rendering work on this workspace is done.
+			assert(next_workspace < workspace.size());
+			workspace_index = next_workspace;
+			next_workspace = (next_workspace + 1) % workspaces.size();
+
+			// wait until the worksapce is not being used:
+			VK( vkWaitForFences(device, 1, &workspaces[workspace_index].workspace_available, VK_TRUE, UINT64_MAX) );
+
+			// mark the workspace as in use:
+			VK( vkResetFences(device, 1, workspaces[workspace_index].workspace_available) );
+		}
+
+		//TODO: acquire an image (resize swapchain if needed)
+
+		//TODO: queue rendering work
+
+		//TODO: present image (resize swapchain if needed)
 	}
 
 	// tear down event handling
