@@ -184,7 +184,39 @@ void RTG::recreate_swapchain() {
 		requested_count = std::min(capabilities.maxImageCount, requested_count);
 	}
 
-	//TODO: make the swapchain
+	{ //create swapchain
+		VkSwapchainCreateInfoKHR create_info{
+			.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+			.surface = surface,
+			.minImageCount = requested_count,
+			.imageFormat = surface_format.format,
+			.imageColorSpace = surface_format.colorSpace,
+			.imageExtent = swapchain_extent,
+			.imageArrayLayers = 1,
+			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.preTransform = capabilities.currentTransform,
+			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+			.presentMode = present_mode,
+			.clipped = VK_TRUE,
+			.oldSwapchain = VK_NULL_HANDLE //NOTE: could be more efficient by passing old swapchain handle here instead of destroying it
+		};
+
+		std::vector< uint32_t > queue_family_indices{
+			graphics_queue_family.value(),
+			present_queue_family.value()
+		};
+
+		if (queue_family_indices[0] != queue_family_indices[1]) {
+			//if images will be presented on a different queue, make sure they are shared:
+			create_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+			create_info.queueFamilyIndexCount = uint32_t(queue_family_indices.size());
+			create_info.pQueueFamilyIndices = queue_family_indices.data();
+		} else {
+			create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		}
+
+		VK( vkCreateSwapchainKHR(device, &create_info, nullptr, &swapchain) );
+	}
 
 	//TODO: get the swapchain images
 
