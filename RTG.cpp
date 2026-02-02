@@ -274,13 +274,41 @@ void RTG::recreate_swapchain() {
 
 
 void RTG::destroy_swapchain() {
-	refsol::RTG_destroy_swapchain(
-		device,
-		&swapchain,
-		&swapchain_images,
-		&swapchain_image_views,
-		&swapchain_image_dones
-	);
+	// refsol::RTG_destroy_swapchain(
+	// 	device,
+	// 	&swapchain,
+	// 	&swapchain_images,
+	// 	&swapchain_image_views,
+	// 	&swapchain_image_dones
+	// );
+
+	// ensure that nothing is actively rendering to a swapchain image (or waiting on a swapchain semaphore) while we are freeing it. 
+	VK( vkDeviceWaitIdle(device) ); // wait for any rendering to old swapchain to finish
+
+	// clean up semaphores used for waiting on the swapchain:
+	for (auto &semaphore : swapchain_image_dones) {
+		vkDestroySemaphore(device, semaphore, nullptr);
+		semaphore = VK_NULL_HANDLE;
+	}
+	swapchain_image_dones.clear();
+
+	// clean up image views referencing swapchain:
+	for (auto &iamge_view : swapchain_image_views) {
+		vkDestroyImageView(device, iamge_view, nullptr);
+		iamge_view = VK_NULL_HANDLE;
+	}
+	swapchain_image_views.clear(); 
+
+	// forget handles to swapchain images (will destroy by deallocating th eswapchain itself):
+	swapchain_images.clear();
+
+	// we don't need to call vkDestroyImage on the swapchain image handles, since these are owned by the swapchain itself. 
+	// (We do need to destroy the image views, since we created those ourselves.)
+	// deallocate the swapchain and (thus) its images:
+	if (swapchain != VK_NULL_HANDLE) {
+		vkDestroySwapchainKHR(device, swapchain, nullptr);
+		swapchain = VK_NULL_HANDLE;
+	}
 }
 
 void RTG::run(Application &application) {
