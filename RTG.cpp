@@ -313,18 +313,142 @@ void RTG::destroy_swapchain() {
 	}
 }
 
+// generates a mouse motion event:
+static void cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) { // what does static mean //vv only visible in this file (file-scoped)
+	std::vector< InputEvent > *event_queue = reinterpret_cast< std::vector< InputEvent > * >(glfwGetWindowUserPointer(window));
+	if (!event_queue) return;
+
+	InputEvent event;
+	std::memset(&event, '\0', sizeof(event)); // what does this do //??  make sure that any parts of the union we don't write are in a known (and boring) state.
+
+	event.type = InputEvent::MouseMotion;
+	event.motion.x = float(xpos);
+	event.motion.y = float(ypos);
+
+	// what does this mean //vv Initializes the button state bitmask to zero before the loop populates it. 
+	// Each bit will represent whether a mouse button is pressed (bit 0 = left button, bit 1 = right, bit 2 = middle, etc.). 
+	event.motion.state = 0; 
+	
+	// Builds a bitmask of which mouse buttons are currently held during this mouse movement:  
+	for (int b = 0; b < 8 && b < GLFW_MOUSE_BUTTON_LAST; ++b) { // what does this loop do //vv Iterates through mouse buttons 0-7 (or up to GLFW_MOUSE_BUTTON_LAST) 
+		if (glfwGetMouseButton(window, b) == GLFW_PRESS) { // For each pressed button, 
+			event.motion.state |= (1 << b); // sets the corresponding bit: state |= (1 << b)
+			// Result: state = 0b00000101 would mean buttons 0 and 2 are pressed 
+		}
+	}
+
+	event_queue->emplace_back(event);
+}
+
+static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
+	std::vector< InputEvent > *event_queue = reinterpret_cast< std::vector< InputEvent > * >(glfwGetWindowUserPointer(window)); // what does this do, what is reinterpret_cast //vv "trust me, this void* is actually a std::vector<InputEvent>*"
+	if (!event_queue) return;
+
+	InputEvent event;
+	std::memset(&event, '\0', sizeof(event));
+
+	if (action == GLFW_PRESS) {
+		event.type = InputEvent::MouseButtonDown;
+	} else if (action == GLFW_RELEASE) {
+		event.type = InputEvent::MouseButtonUp;
+	} else {
+		std::cerr << "Strange: unknown mouse button action." << std::endl;
+		return;
+	}
+
+	double xpos, ypos;
+	glfwGetCursorPos(window, &xpos, &ypos);
+	event.button.x = float(xpos);
+	event.button.y = float(ypos);
+	event.button.state = 0; // what does this mean //vv This records which other buttons are held while this button was clicked (e.g., Ctrl+click, or left+right click together). 
+	for (int b = 0; b < 8 && b < GLFW_MOUSE_BUTTON_LAST; ++b) {
+		if (glfwGetMouseButton(window, b) == GLFW_PRESS) {
+			event.button.state |= (1 << b);
+		}
+	}
+
+	// Stores which button triggered this callback:                                                             
+	// - button = 0 → Left mouse button (GLFW_MOUSE_BUTTON_LEFT)                                                
+	// - button = 1 → Right mouse button (GLFW_MOUSE_BUTTON_RIGHT)                                              
+	// - button = 2 → Middle mouse button (GLFW_MOUSE_BUTTON_MIDDLE)   
+	event.button.button = uint8_t(button); // what does this do //vv
+
+	// Stores modifier keys held during the click. mods is a bitmask:                                           
+	// - GLFW_MOD_SHIFT (0x0001) - Shift key                                                                    
+	// - GLFW_MOD_CONTROL (0x0002) - Ctrl key                                                                   
+	// - GLFW_MOD_ALT (0x0004) - Alt key                                                                        
+	// - GLFW_MOD_SUPER (0x0008) - Windows/Cmd key   
+	event.button.mods = uint8_t(mods); // what's this //vv
+
+	event_queue->emplace_back(event);
+}
+
+
+static void scroll_callback(GLFWwindow *window, double xpos, double ypos) {
+	std::vector< InputEvent > *event_queue = reinterpret_cast< std::vector< InputEvent > * >(glfwGetWindowUserPointer(window));
+	if (!event_queue) return;
+
+	InputEvent event;
+	std::memset(&event, '\0', sizeof(event)); //?? explain what memset() does, then explain what this code do
+
+	event.type = InputEvent::MouseWheel;
+	event.motion.x = float(xoffset);
+	event.motion.y = float(yoffset);
+
+	event_queue->emplace_back(event)
+}
+
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
+	std::vector< InputEvent > *event_queue = reinterpret_cast< std::vector< InputEvent > * >(glfwGetWindowUserPointer(window)); // what does this do, what is reinterpret_cast //vv "trust me, this void* is actually a std::vector<InputEvent>*"
+	if (!event_queue) return;
+
+	InputEvent event;
+	std::memset(&event, '\0', sizeof(event));
+
+	if (action == GLFW_PRESS) {
+		event.type = InputEvent::KeyDown;
+	} else if (action == GLFW_RELEASE) {
+		event.type = InputEvent::KeyUp;
+	} else if (action == GLFW_REPEAT) {
+		// ignore repeats
+		return;
+	} else {
+		std::cerr << "Strange: unknown mouse button action." << std::endl;
+		return;
+	}
+  
+	event.key.key = uint8_t(key); 
+	event.key.mods = uint8_t(mods);
+
+	event_queue->emplace_back(event);
+}
+
 // the "harness" that connects an RTG::Application (like Tutorial) to the windowing system and GPU.
 void RTG::run(Application &application) {
 	// refsol::RTG_run(*this, application);
 	//TODO: initial on_swapchain
 
-	//TODO: setup event handling
+	// setup event handling
+	std::vector< InputEvent > event_queue;
+	glfwSetWindowUserPointer(window, &event_queue);
+
+	glfwSetCursorPosCallback(wiindow, cursor_pos_callback);
+	glfwSetMousebuttonCallback(wiundow, mouse_button_callback);
+	glfwSetScrollCallback(wiundow, scroll_callback);
+	glfwSetKEyCallback(window, key_callback);
 
 	// setup time handling:
 	std::chrono::high_resolution_clock::time_point before = std::chrono::high_resolution_clock::now();
 
 	while (!glfwWindowShouldClose(window)) { // run until GLFW lets us know the window should be closed via the glfwWindowShouldClose call.
-		//TODO: event handling
+		// event handling
+		glfwPollEvents();
+
+		// deliver all input events to application:
+		for (InputEvent const &input : event_queue) {
+			application.on_input(input); // what does on_input do //vv Tutorial::on_input seems to be empty because the tutorial currently doesn't need user input
+		}
+		event_queue.clear();
 
 		{ // elapsed time handling
 				std::chrono::high_resolution_clock::time_point after = std::chrono::high_resolution_clock::now();
@@ -341,5 +465,11 @@ void RTG::run(Application &application) {
 		//TODO: render handling (with on_swapchain as needed)
 	}
 
-	//TODO: tear down event handling
+	// tear down event handling
+	glfwSetCursorPosCallback(wiindow, nullptr);
+	glfwSetMousebuttonCallback(wiundow, nullptr);
+	glfwSetScrollCallback(wiundow, nullptr);
+	glfwSetKEyCallback(window, nullptr);
+
+	glfwSetWindowUserPointer(window, nullptr);
 }
