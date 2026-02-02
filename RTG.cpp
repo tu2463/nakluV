@@ -293,6 +293,7 @@ void RTG::destroy_swapchain() {
 	swapchain_image_dones.clear();
 
 	// clean up image views referencing swapchain:
+	// Destroy image views with vkDestroyImageView (you created them with vkCreateImageView, you destroy them) 
 	for (auto &iamge_view : swapchain_image_views) {
 		vkDestroyImageView(device, iamge_view, nullptr);
 		iamge_view = VK_NULL_HANDLE;
@@ -300,6 +301,7 @@ void RTG::destroy_swapchain() {
 	swapchain_image_views.clear(); 
 
 	// forget handles to swapchain images (will destroy by deallocating th eswapchain itself):
+	// Just clear the image handles vector (no vkDestroyImage call - you don't own them)
 	swapchain_images.clear();
 
 	// we don't need to call vkDestroyImage on the swapchain image handles, since these are owned by the swapchain itself. 
@@ -311,6 +313,33 @@ void RTG::destroy_swapchain() {
 	}
 }
 
+// the "harness" that connects an RTG::Application (like Tutorial) to the windowing system and GPU.
 void RTG::run(Application &application) {
-	refsol::RTG_run(*this, application);
+	// refsol::RTG_run(*this, application);
+	//TODO: initial on_swapchain
+
+	//TODO: setup event handling
+
+	// setup time handling:
+	std::chrono::high_resolution_clock::time_point before = std::chrono::high_resolution_clock::now();
+
+	while (!glfwWindowShouldClose(window)) { // run until GLFW lets us know the window should be closed via the glfwWindowShouldClose call.
+		//TODO: event handling
+
+		{ // elapsed time handling
+				std::chrono::high_resolution_clock::time_point after = std::chrono::high_resolution_clock::now();
+
+				// - At 60 FPS: dt ≈ 0.0167 seconds (~16.7 ms)                                                              
+  				// - At 30 FPS: dt ≈ 0.0333 seconds (~33.3 ms) 
+				float dt = float(std::chrono::duration< double >(after - before).count()); // seconds passed (in float)
+				before = after;
+				dt = std::min(dt, 0.1f); // lag if frame wrate dips too slow
+				application.update(dt); // the Tutorial::update(float dt)
+
+		}
+
+		//TODO: render handling (with on_swapchain as needed)
+	}
+
+	//TODO: tear down event handling
 }
