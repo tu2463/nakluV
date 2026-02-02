@@ -688,13 +688,60 @@ Tutorial::~Tutorial() {
 void Tutorial::on_swapchain(RTG &rtg_, RTG::SwapchainEvent const &swapchain) {
 	//[re]create framebuffers:
 	// refsol::Tutorial_on_swapchain(rtg, swapchain, depth_format, render_pass, &swapchain_depth_image, &swapchain_depth_image_view, &swapchain_framebuffers);
-	//TODO: clean up existing framebuffers
+	// clean up existing framebuffers (and depth image):
+	if (swapchain_depth_image.handle != VK_NULL_HANDLE) {
+		destroy_framebuffers();
+	}
 
-	//TODO: allocate depth image for framebuffers to share
+	//allocate depth image for framebuffers to share:
+	swapchain_depth_image = rtg.helpers.create_image(
+		swapchain.extent,
+		depth_format,
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		Helpers::Unmapped
+	);
 
-	//TODO: create an image view of the depth image
+	{ //create depth image view:
+		// The depth image view references the entire depth image as a 2D texture with depth values
+		VkImageViewCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.image = swapchain_depth_image.handle,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D,
+			.format = depth_format,
+			.subresourceRange{
+				.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1
+			},
+		};
 
-	//TODO: create framebuffers pointing to each swapchain image view and the shared depth image view
+		VK( vkCreateImageView(rtg.device, &create_info, nullptr, &swapchain_depth_image_view) );
+	}
+
+	// create framebuffers pointing to each swapchain image view and the shared depth image view
+	//Make framebuffers for each swapchain image:
+	swapchain_framebuffers.assign(swapchain.image_views.size(), VK_NULL_HANDLE); // resizes the vector and fills in with the null handle
+	for (size_t i = 0; i < swapchain.image_views.size(); ++i) {
+		std::array< VkImageView, 2 > attachments{
+			swapchain.image_views[i],
+			swapchain_depth_image_view,
+		};
+		VkFramebufferCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+			.renderPass = render_pass,
+			.attachmentCount = uint32_t(attachments.size()),
+			.pAttachments = attachments.data(),
+			.width = swapchain.extent.width,
+			.height = swapchain.extent.height,
+			.layers = 1,
+		};
+
+		VK( vkCreateFramebuffer(rtg.device, &create_info, nullptr, &swapchain_framebuffers[i]) );
+	}
 }
 
 void Tutorial::destroy_framebuffers() {
