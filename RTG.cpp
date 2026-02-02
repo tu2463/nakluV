@@ -384,7 +384,7 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 }
 
 
-static void scroll_callback(GLFWwindow *window, double xpos, double ypos) {
+static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
 	std::vector< InputEvent > *event_queue = reinterpret_cast< std::vector< InputEvent > * >(glfwGetWindowUserPointer(window));
 	if (!event_queue) return;
 
@@ -395,7 +395,7 @@ static void scroll_callback(GLFWwindow *window, double xpos, double ypos) {
 	event.motion.x = float(xoffset);
 	event.motion.y = float(yoffset);
 
-	event_queue->emplace_back(event)
+	event_queue->emplace_back(event);
 }
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
@@ -441,10 +441,10 @@ void RTG::run(Application &application) {
 	std::vector< InputEvent > event_queue;
 	glfwSetWindowUserPointer(window, &event_queue);
 
-	glfwSetCursorPosCallback(wiindow, cursor_pos_callback);
-	glfwSetMousebuttonCallback(wiundow, mouse_button_callback);
-	glfwSetScrollCallback(wiundow, scroll_callback);
-	glfwSetKEyCallback(window, key_callback);
+	glfwSetCursorPosCallback(window, cursor_pos_callback);
+	glfwSetMouseButtonCallback(window, mouse_button_callback);
+	glfwSetScrollCallback(window, scroll_callback);
+	glfwSetKeyCallback(window, key_callback);
 
 	// setup time handling:
 	std::chrono::high_resolution_clock::time_point before = std::chrono::high_resolution_clock::now();
@@ -476,7 +476,7 @@ void RTG::run(Application &application) {
 		{
 			// acquire a workspace i.e. getting a set of buffers that aren't being used in a current rendering operation
 			// How do we know a workspace isn't being used? Each workspace has an associated workspace_available fence, which is signaled when the rendering work on this workspace is done.
-			assert(next_workspace < workspace.size());
+			assert(next_workspace < workspaces.size());
 			workspace_index = next_workspace;
 			next_workspace = (next_workspace + 1) % workspaces.size();
 
@@ -484,14 +484,14 @@ void RTG::run(Application &application) {
 			VK( vkWaitForFences(device, 1, &workspaces[workspace_index].workspace_available, VK_TRUE, UINT64_MAX) );
 
 			// mark the workspace as in use:
-			VK( vkResetFences(device, 1, workspaces[workspace_index].workspace_available) );
+			VK( vkResetFences(device, 1, &workspaces[workspace_index].workspace_available) );
 		}
 
 		uint32_t image_index = -1U;
 		// acquire an image (resize swapchain if needed):
 retry:          
 		// ask the swapchain for the next image index - note careful return handling:
-		if (VKResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, workspaces[workspace_index].image_available, VK_NULL_HANDLE, &image_index); 
+		if (VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, workspaces[workspace_index].image_available, VK_NULL_HANDLE, &image_index); 
 			result == VK_ERROR_OUT_OF_DATE_KHR) {
 			// if the swapchain is out-of-date, 
 			std::cerr << "Recreating swapchain because vkAquireNextImageKHR returned" << string_VkResult(result) << "." << std::endl; // what is std::cerr //??
@@ -520,16 +520,37 @@ retry:
 			.workspace_available = workspaces[workspace_index].workspace_available,
 		});
 
-		//TODO: queue rendering work
+		{ // queue the rendering work for presentation:
+			VkPresentInfoKHR present_info{
+				.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+				.waitSemaphoreCount = 1, 
+				.pWaitSemaphores = &swapchain_image_dones[image_index],
+				.swapchainCount = 1,
+				.pSwapchains = &swapchain,
+				.pImageIndices = &image_index,
+			};
+
+			assert(present_queue);
+
+			// note, again, the careful return handling:
+			if (VkResult result = vkQueuePresentKHR(present_queue, &present_info);
+				result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+				std::cerr << "Recreating swapchain because vkQueuePresentKHR returned" << string_VkResult(result) << "." << std::endl;
+				recreate_swapchain();
+				on_swapchain();
+			} else if (result != VK_SUCCESS) {
+				throw std::runtime_error("failed to queue presentation of image (" + std::string(string_VkResult(result)) + ")!");
+			}
+		}
 
 		//TODO: present image (resize swapchain if needed)
 	}
 
 	// tear down event handling
-	glfwSetCursorPosCallback(wiindow, nullptr);
-	glfwSetMousebuttonCallback(wiundow, nullptr);
-	glfwSetScrollCallback(wiundow, nullptr);
-	glfwSetKEyCallback(window, nullptr);
+	glfwSetCursorPosCallback(window, nullptr);
+	glfwSetMouseButtonCallback(window, nullptr);
+	glfwSetScrollCallback(window, nullptr);
+	glfwSetKeyCallback(window, nullptr);
 
 	glfwSetWindowUserPointer(window, nullptr);
 }

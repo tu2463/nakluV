@@ -6,7 +6,7 @@
 // *                                                       *
 // * WARNING:                                              *
 // *                                                       *
-// *    Editing this structure will break refsol::RTG_run  *
+// *    Editing this structure will break refsol::RTG_run  * <- not anymore after step6!
 // *                                                       *
 // *********************************************************
 
