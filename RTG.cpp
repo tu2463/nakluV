@@ -195,7 +195,7 @@ void RTG::recreate_swapchain() {
 			.imageArrayLayers = 1,
 			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
 			.preTransform = capabilities.currentTransform,
-			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, //  No transparency; controls how your window blends with content behind it (like the desktop or other windows).
 			.presentMode = present_mode,
 			.clipped = VK_TRUE,
 			.oldSwapchain = VK_NULL_HANDLE //NOTE: could be more efficient by passing old swapchain handle here instead of destroying it
@@ -218,7 +218,13 @@ void RTG::recreate_swapchain() {
 		VK( vkCreateSwapchainKHR(device, &create_info, nullptr, &swapchain) );
 	}
 
-	//TODO: get the swapchain images
+	// Creating the swapchain created a list of images, but we can't do anything with those images without VkImage handles, so
+	{ //get the swapchain images:
+		uint32_t count = 0;
+		VK( vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr) ); // getting the array size; Queries that return a variable-length array will return just the length if the data parameter is nullptr
+		swapchain_images.resize(count);
+		VK( vkGetSwapchainImagesKHR(device, swapchain, &count, swapchain_images.data()) );
+	}
 
 	//TODO: make image views
 
