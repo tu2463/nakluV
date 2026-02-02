@@ -17,7 +17,101 @@ struct Vec3 {
 };
 
 Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
-	refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
+	// refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
+
+	// select a depth format:
+	// at least one of these two must be supported, according to the spec; but neither are required
+	depth_format = rtg.helpers.find_image_format(
+		{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_X8_D24_UNORM_PACK32 }, // one-component, 32-bit signed floating-point format that has 32 bits in the depth component;  a two-component, 32-bit format that has 24 unsigned normalized bits in the depth component and, optionally, 8 bits that are unused.
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT //  an image view can be used as a framebuffer depth/stencil attachment and as an input attachment.
+	);
+
+	{ // create remder pass 
+		// attachments
+		std::array< VkAttachmentDescription, 2 > attachments{
+			VkAttachmentDescription{ // color attachment:
+				.format = rtg.surface_format.format,
+				.samples = VK_SAMPLE_COUNT_1_BIT,
+				.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, // Clear to background color at start; how to actually load the data (.loadOp) before rendering happens
+				.storeOp = VK_ATTACHMENT_STORE_OP_STORE, // Save results after rendering; how to write the data back after rendering (.storeOp)
+				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, // No stencil buffer
+				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, // Don't care about old contents // what layout (.initialLayout) the image will be transitioned to before the load
+				.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Prepare for display // what layout (.finalLayout) the image will be transitioned to after the store.
+			},
+			VkAttachmentDescription{ // depth attachment:
+				.format = depth_format,
+				.samples = VK_SAMPLE_COUNT_1_BIT,
+				.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+				.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, // Clear to max depth at start
+				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, // Discard after rendering
+				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			},
+		};
+
+		// subpass
+		VkAttachmentReference color_attachment_ref{
+			.attachment = 1,
+			.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		};
+
+		VkAttachmentReference depth_attachment_ref{
+			.attachment = 0,
+			.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		};
+
+		VkSubpassDescription subpass{
+			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+			.inputAttachmentCount = 0, 
+			.pInputAttachments = nullptr,
+			.colorAttachmentCount = 1,
+			.pColorAttachments = &color_attachment_ref,
+			.pDepthStencilAttachment = &depth_attachment_ref,
+		};
+
+		// dependencies
+		//this defers the image load actions for the attachments:
+		std::array< VkSubpassDependency, 2 > dependencies {
+			// finish all work in the color attachment output stage, then do the layout transition, then start work in the color attachment output stage again
+			// Before this render pass writes to the color attachment (`dstAccessMask = WRITE`), wait for any previous color attachment output operations (`srcStageMask`) from external work to complete.
+			VkSubpassDependency{
+				.srcSubpass = VK_SUBPASS_EXTERNAL, // everthing before; "Previous frame" or pre-render pass work
+				.dstSubpass = 0,  // Our subpass (the first one, index 0)
+				.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				.srcAccessMask = 0, // We don't care *what* the previous frame did (reading, writing, presenting)—we just need to wait until it's done touching the color attachment. The `initialLayout = UNDEFINED` already told Vulkan we're overwriting everything anyway.
+				.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			},
+			
+			// when all existing work finishes the late fragment tests stage (the last point in the pipeline that touches the depth buffer), 
+			// then the layout transition for the depth image happens, 
+			// before subpass zero of this render pass can do operations in its early fragment tests stage (the earliest stage that touches the depth buffer).
+			// Before early fragment tests write to the depth attachment in this render pass, wait for any previous late fragment test writes from external work to finish.
+			VkSubpassDependency{
+				.srcSubpass = VK_SUBPASS_EXTERNAL,
+				.dstSubpass = 0,
+
+				// If the previous frame was doing depth testing, finish writing those depth values before we clear and start using the depth buffer.
+				.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, // Happen *after* fragment shaders (for things like alpha testing)
+				.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, // Happen *before* fragment shaders run (fast depth rejection)
+				.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+				.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			}
+		};
+
+		VkRenderPassCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+			.attachmentCount = uint32_t(attachments.size()),
+			.pAttachments = attachments.data(),
+			.subpassCount = 1,
+			.pSubpasses = &subpass,
+			.dependencyCount = uint32_t(dependencies.size()),
+			.pDependencies = dependencies.data(),
+		};
+	}
 
 	background_pipeline.create(rtg, render_pass, 0);
 	lines_pipeline.create(rtg, render_pass, 0);
@@ -568,7 +662,13 @@ Tutorial::~Tutorial() {
 	lines_pipeline.destroy(rtg);
 	objects_pipeline.destroy(rtg);
 
-	refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
+	// refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
+	//TODO: destroy command pool
+	
+	if (render_pass != VK_NULL_HANDLE) {
+		vkDestroyRenderPass(rtg.device, render_pass, nullptr);
+		render_pass = VK_NULL_HANDLE;
+	}
 }
 
 void Tutorial::on_swapchain(RTG &rtg_, RTG::SwapchainEvent const &swapchain) {
