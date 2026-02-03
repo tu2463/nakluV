@@ -181,6 +181,10 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		// 	&window,
 		// 	&surface
 		// );
+
+		// GLFW uses a hint system to configure the next window created. This Set hints (affects next glfwCreateWindow call) 
+		// A hint is a configuration request that the system will try to honor, but isn't guaranteed. 
+		// GLFW_CLIENT_API is hint name - it specifies which graphics API GLFW should set up for the window; GLFW_NO_API means No OpenGL (for Vulkan use)
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
 		window = glfwCreateWindow(configuration.surface_extent.width, configuration.surface_extent.height, configuration.application_info.pApplicationName, nullptr, nullptr);
@@ -192,13 +196,75 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		VK( glfwCreateWindowSurface(instance, window, nullptr, &surface) );
 	}
 
-	//select the `physical_device` -- the gpu that will be used to draw:
-	refsol::RTG_constructor_select_physical_device(
-		configuration.debug,
-		configuration.physical_device_name,
-		instance,
-		&physical_device
-	);
+	{ //select the `physical_device` -- the gpu that will be used to draw:
+		// refsol::RTG_constructor_select_physical_device(
+		// 	configuration.debug,
+		// 	configuration.physical_device_name,
+		// 	instance,
+		// 	&physical_device
+		// );
+		std::vector< std::string > physical_device_names; //for later error message
+		{ //pick the best physical device
+			uint32_t count = 0;
+			VK( vkEnumeratePhysicalDevices(instance, &count, nullptr) ); // sets count
+			std::vector< VkPhysicalDevice > physical_devices(count);
+			VK( vkEnumeratePhysicalDevices(instance, &count, physical_devices.data()) ); // Enumerates the physical devices accessible to a Vulkan instance
+
+			uint32_t best_score = 0;
+
+			for (auto const &pd : physical_devices) {
+				VkPhysicalDeviceProperties properties;
+				vkGetPhysicalDeviceProperties(pd, &properties);
+
+				VkPhysicalDeviceFeatures features;
+				vkGetPhysicalDeviceFeatures(pd, &features);
+
+				physical_device_names.emplace_back(properties.deviceName);
+
+				if (!configuration.physical_device_name.empty()) { // either (a) look for a name matching the configuration, if one was specified:
+					if (configuration.physical_device_name == properties.deviceName) {
+						if (physical_device) {
+							std::cerr << "WARNING: have two physical devices with the name '" << properties.deviceName << "'; using the first to be enumerated." << std::endl;
+						} else {
+							physical_device = pd;
+						}
+					}
+				} else { // or (b) look for a device with a high "score" for a simple scoring function:
+					uint32_t score = 1;
+					//  just looks for any discrete GPU. You might -- at some point -- want to refine this to look for specific features of interest.
+					if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+						score += 0x8000;
+					}
+
+					if (score > best_score) {
+						best_score = score;
+						physical_device = pd;
+					}
+				}
+			}
+		}
+
+		if (physical_device == VK_NULL_HANDLE) {
+			// report error
+			std::cerr << "Physical devices:\n";
+			for (std::string const &name : physical_device_names) {
+				std::cerr << "    " << name << "\n";
+			}
+			std::cerr.flush(); //vv make error appears immediately
+
+			if (!configuration.physical_device_name.empty()) {
+				throw std::runtime_error("No physical device with name '" + configuration.physical_device_name + "'.");
+			} else {
+				throw std::runtime_error("No suitable GPU found.");
+			}
+		}
+
+		{ //report device name:
+			VkPhysicalDeviceProperties properties;
+			vkGetPhysicalDeviceProperties(physical_device, &properties);
+			std::cout << "Selected physical device '" << properties.deviceName << "'." << std::endl;
+		}
+	}
 
 	//select the `surface_format` and `present_mode` which control how colors are represented on the surface and how new images are supplied to the surface:
 	refsol::RTG_constructor_select_format_and_mode(
