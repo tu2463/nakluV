@@ -74,6 +74,9 @@ struct RTG {
 		//how many "workspaces" (frames that can currently be being worked on by the CPU or GPU) to use:
 		uint32_t workspaces = 2;
 
+		// run without a window, read events from stdin:
+		bool headless = false;
+
 		//for configuration construction + management:
 		Configuration() = default;
 		void parse(int argc, char **argv); //parse command-line options; throws on error

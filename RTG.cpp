@@ -42,6 +42,8 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			};
 			surface_extent.width = conv("width");
 			surface_extent.height = conv("height");
+		} else if (arg == "--headless") {
+			headless = true;
 		} else {
 			throw std::runtime_error("Unrecognized argument '" + arg + "'.");
 		}
@@ -52,6 +54,7 @@ void RTG::Configuration::usage(std::function< void(const char *, const char *) >
 	callback("--debug, --no-debug", "Turn on/off debug and validation layers.");
 	callback("--physical-device <name>", "Run on the named physical device (guesses, otherwise).");
 	callback("--drawing-size <w> <h>", "Set the size of the surface to draw to.");
+	callback("--headless", "Don't create a window; read events from stdin.");
 }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
