@@ -165,8 +165,35 @@ RTG::~RTG() {
 	helpers.destroy();
 
 	//destroy the rest of the resources:
-	refsol::RTG_destructor( &device, &surface, &window, &debug_messenger, &instance );
+	// refsol::RTG_destructor( &device, &surface, &window, &debug_messenger, &instance );
+	if (device != VK_NULL_HANDLE) { // logical device is the handle to our code's view of the GPU
+		vkDestroyDevice(device, nullptr);
+		device = VK_NULL_HANDLE;
+	}
 
+	if (surface != VK_NULL_HANDLE) { // surface is Vulkan's view of the part of the window that shows our graphics
+		vkDestroySurfaceKHR(instance, surface, nullptr);
+		surface = VK_NULL_HANDLE;
+	}
+
+	if (window != nullptr) { // window is the handle showing output, managed by GLFW
+		glfwDestroyWindow(window);
+		window = nullptr;
+	}
+
+	// The debug_messenger holds information about the callback function that we've been using to get information from the validation layer
+	if (debug_messenger != VK_NULL_HANDLE) {
+		PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+		if (vkDestroyDebugUtilsMessengerEXT) {
+			vkDestroyDebugUtilsMessengerEXT(instance, debug_messenger, nullptr);
+			debug_messenger = VK_NULL_HANDLE;
+		}
+	}
+
+	if (instance != VK_NULL_HANDLE) { // instance is handle to library
+		vkDestroyInstance(instance, nullptr);
+		instance = VK_NULL_HANDLE;
+	}
 }
 
 
