@@ -9,6 +9,7 @@
 #include <vulkan/vulkan_metal.h> //for VK_EXT_METAL_SURFACE_EXTENSION_NAME
 #endif
 #include <vulkan/vk_enum_string_helper.h> //useful for debug output
+#include <vulkan/utility/vk_format_utils.h> //for getting format sizes
 #include <GLFW/glfw3.h>
 
 #include <cassert>
@@ -523,59 +524,185 @@ void RTG::recreate_swapchain() {
 		destroy_swapchain();
 	}
 
-	//determine size, image count, and transform (capabilities.currentTransform) for swapchain:
-	// size:
-	VkSurfaceCapabilitiesKHR capabilities;
-	VK( vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities) );
-	swapchain_extent = capabilities.currentExtent;
+	if (configuration.headless) {
+		assert(surface == VK_NULL_HANDLE); //headless, so must not have a surface
 
-	// image count:
-	// set to one more than the minimum supported, but clamp it to the maximum supported count
-	uint32_t requested_count = capabilities.minImageCount + 1; // add one more to allow some amount of parallelism in rendering.
-	if (capabilities.maxImageCount != 0) {
-		requested_count = std::min(capabilities.maxImageCount, requested_count);
-	}
+		//make a fake swapchain:
 
-	{ //create swapchain
-		VkSwapchainCreateInfoKHR create_info{
-			.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-			.surface = surface,
-			.minImageCount = requested_count,
-			.imageFormat = surface_format.format,
-			.imageColorSpace = surface_format.colorSpace,
-			.imageExtent = swapchain_extent,
-			.imageArrayLayers = 1,
-			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			.preTransform = capabilities.currentTransform,
-			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, //  No transparency; controls how your window blends with content behind it (like the desktop or other windows).
-			.presentMode = present_mode,
-			.clipped = VK_TRUE,
-			.oldSwapchain = VK_NULL_HANDLE //NOTE: could be more efficient by passing old swapchain handle here instead of destroying it
-		};
+		// set extent from configuration
+		swapchain_extent = configuration.surface_extent;
 
-		std::vector< uint32_t > queue_family_indices{
-			graphics_queue_family.value(),
-			present_queue_family.value()
-		};
+		// set number of images to 3
+		uint32_t requested_count = 3; //enough for FIFO-style presentation
 
-		if (queue_family_indices[0] != queue_family_indices[1]) {
-			//if images will be presented on a different queue, make sure they are shared:
-			create_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-			create_info.queueFamilyIndexCount = uint32_t(queue_family_indices.size());
-			create_info.pQueueFamilyIndices = queue_family_indices.data();
-		} else {
-			create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		{ //create command pool for the headless image copy command buffers:
+
+			//  In headless mode, there's no window or real swapchain. Instead, the      
+			// 	application creates a "fake swapchain" with its own GPU images. The      
+			// 	command pool is used to allocate command buffers that copy rendered      
+			// 	images from GPU memory to host memory (so they can be saved to files or  
+			// 	processed).                                                              
+
+			// Since we're going to record these commands once and never reset them, we don't pass VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT when creating the command pool.
+			assert(headless_command_pool == VK_NULL_HANDLE);
+			VkCommandPoolCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+				.flags = 0,
+				.queueFamilyIndex = graphics_queue_family.value(),
+			};
+			VK( vkCreateCommandPool(device, &create_info, nullptr, &headless_command_pool) );
 		}
 
-		VK( vkCreateSwapchainKHR(device, &create_info, nullptr, &swapchain) );
-	}
+		// create headless_swapchain
+		assert(headless_swapchain.empty());
+		headless_swapchain.reserve(requested_count);
+		for (uint32_t i = 0; i < requested_count; ++i) {
+			//add a headless "swapchain" image:
+			HeadlessSwapchainImage &h = headless_swapchain.emplace_back();
 
-	// Creating the swapchain created a list of images, but we can't do anything with those images without VkImage handles, so
-	{ //get the swapchain images:
-		uint32_t count = 0;
-		VK( vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr) ); // getting the array size; Queries that return a variable-length array will return just the length if the data parameter is nullptr
-		swapchain_images.resize(count);
-		VK( vkGetSwapchainImagesKHR(device, swapchain, &count, swapchain_images.data()) );
+			//allocate image data: (on-GPU, will be rendered to)
+			h.image = helpers.create_image(
+				swapchain_extent,
+				surface_format.format,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, // The image can be used as a color attachment in a framebuffer (i.e., you can render to it) + The image can be used as the source of a transfer/copy operation 
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT // is allocated on the GPU
+			);
+
+			//allocate buffer data: (on-CPU, will be copied to)
+			h.buffer = helpers.create_buffer(
+				// calculates the buffer size in bytes needed to hold the entire image for CPU readback:
+				// width × height × texelBlockSize / texelsPerBlock // TODO: understand this
+				swapchain_extent.width * swapchain_extent.height * vkuFormatTexelBlockSize(surface_format.format) / vkuFormatTexelsPerBlock(surface_format.format),
+				
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT, // the image will be received as a transfer destination
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+				Helpers::Mapped // host-visible, host-coherent, mapped memory so it's easy for us to extract the image for saving later.
+			);
+
+			{ //create and record copy command:
+				// almost identical to the one used in Helpers::transfer_to_image, except that we're copying image-to-buffer, not buffer-to-image.
+				VkCommandBufferAllocateInfo alloc_info{
+					.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+					.commandPool = headless_command_pool,
+					.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+					.commandBufferCount = 1,
+				};
+				VK( vkAllocateCommandBuffers(device, &alloc_info, &h.copy_command) );
+
+				//record:
+				// we're going to submit the command buffer more that once, 
+				// so we don't specify VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT in the begin_info flags.
+				VkCommandBufferBeginInfo begin_info{
+					.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+					.flags = 0,
+				};
+				VK( vkBeginCommandBuffer(h.copy_command, &begin_info) );
+
+				
+				VkBufferImageCopy region{
+					.bufferOffset = 0,
+					.bufferRowLength = swapchain_extent.width,
+					.bufferImageHeight = swapchain_extent.height,
+					.imageSubresource{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.mipLevel = 0,
+						.baseArrayLayer = 0,
+						.layerCount = 1,
+					},
+					.imageOffset{ .x = 0, .y = 0, .z = 0 },
+					.imageExtent{
+						.width = swapchain_extent.width,
+						.height = swapchain_extent.height,
+						.depth = 1
+					},
+				};
+				vkCmdCopyImageToBuffer(
+					h.copy_command, // command buffer
+					h.image.handle, // source
+					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, // source image layout; note that we'll need to make sure the image is transitioned to this layout when rendering finishes
+					h.buffer.handle, // dest buffer
+					1, &region
+				);
+				
+				VK( vkEndCommandBuffer(h.copy_command) );
+			}
+
+			{ //create fence to signal when image is done being "presented" (copied to host memory):
+				VkFenceCreateInfo create_info{
+					.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+					.flags = VK_FENCE_CREATE_SIGNALED_BIT, //start signaled, because all images are available to start with
+				};
+				VK( vkCreateFence(device, &create_info, nullptr, &h.image_presented) );
+			}
+		}
+
+		//copy image references into swapchain_images:
+		// instead of calling vkGetSwapchainImagesKHR to extract references to the images, we just copy the images' handles
+		assert(swapchain_images.empty());
+		swapchain_images.assign(requested_count, VK_NULL_HANDLE);
+		for (uint32_t i = 0; i < requested_count; ++i) {
+			swapchain_images[i] = headless_swapchain[i].image.handle;
+		}
+	} else {
+		assert(surface != VK_NULL_HANDLE); //not headless, so must have a surface
+
+		//request a swapchain from the windowing system:
+
+		//determine size, image count, and transform (capabilities.currentTransform) for swapchain:
+		// size:
+		VkSurfaceCapabilitiesKHR capabilities;
+		VK( vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &capabilities) );
+		swapchain_extent = capabilities.currentExtent;
+
+		// image count:
+		// set to one more than the minimum supported, but clamp it to the maximum supported count
+		uint32_t requested_count = capabilities.minImageCount + 1; // add one more to allow some amount of parallelism in rendering.
+		if (capabilities.maxImageCount != 0) {
+			requested_count = std::min(capabilities.maxImageCount, requested_count);
+		}
+
+		{ //create swapchain
+			VkSwapchainCreateInfoKHR create_info{
+				.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+				.surface = surface,
+				.minImageCount = requested_count,
+				.imageFormat = surface_format.format,
+				.imageColorSpace = surface_format.colorSpace,
+				.imageExtent = swapchain_extent,
+				.imageArrayLayers = 1,
+				.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+				.preTransform = capabilities.currentTransform,
+				.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, //  No transparency; controls how your window blends with content behind it (like the desktop or other windows).
+				.presentMode = present_mode,
+				.clipped = VK_TRUE,
+				.oldSwapchain = VK_NULL_HANDLE //NOTE: could be more efficient by passing old swapchain handle here instead of destroying it
+			};
+
+			std::vector< uint32_t > queue_family_indices{
+				graphics_queue_family.value(),
+				present_queue_family.value()
+			};
+
+			if (queue_family_indices[0] != queue_family_indices[1]) {
+				//if images will be presented on a different queue, make sure they are shared:
+				create_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+				create_info.queueFamilyIndexCount = uint32_t(queue_family_indices.size());
+				create_info.pQueueFamilyIndices = queue_family_indices.data();
+			} else {
+				create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+			}
+
+			VK( vkCreateSwapchainKHR(device, &create_info, nullptr, &swapchain) );
+		}
+
+		// Creating the swapchain created a list of images, but we can't do anything with those images without VkImage handles, so
+		{ //get the swapchain images:
+			uint32_t count = 0;
+			VK( vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr) ); // getting the array size; Queries that return a variable-length array will return just the length if the data parameter is nullptr
+			swapchain_images.resize(count);
+			VK( vkGetSwapchainImagesKHR(device, swapchain, &count, swapchain_images.data()) );
+		}
 	}
 
 	// Vulkan code that accesses images generally does so through an image view (handle type: VkImageView). 

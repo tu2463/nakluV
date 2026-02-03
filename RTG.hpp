@@ -122,6 +122,17 @@ struct RTG {
 	//The swapchain is the list of images that get rendered to and shown on the surface:
 	VkSwapchainKHR swapchain = VK_NULL_HANDLE; //in non-headless mode, swapchain images are managed by this object; in headless mode this will be null
 
+	// Our fake swapchain's version of "presenting" images will be to copy them from device memory to host memory (from whence they can, optionally, be saved to a file).
+	//in headless mode, we maintain our own swapchain:
+	VkCommandPool headless_command_pool = VK_NULL_HANDLE;
+	struct HeadlessSwapchainImage {
+		Helpers::AllocatedImage image; //on-GPU rendering target
+		Helpers::AllocatedBuffer buffer; //host memory to copy image to after rendering
+		VkCommandBuffer copy_command = VK_NULL_HANDLE; //copy image -> buffer
+		VkFence image_presented = VK_NULL_HANDLE; //fence to signal after copy finishes
+	};
+	std::vector< HeadlessSwapchainImage > headless_swapchain;
+
 	VkExtent2D swapchain_extent = {.width = 0, .height = 0}; //current size of the swapchain
 	std::vector< VkImage > swapchain_images; //images in the swapchain
 	std::vector< VkImageView > swapchain_image_views; //image views of the images in the swapchain
