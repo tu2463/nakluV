@@ -783,12 +783,36 @@ void RTG::destroy_swapchain() {
 	// Just clear the image handles vector (no vkDestroyImage call - you don't own them)
 	swapchain_images.clear();
 
-	// we don't need to call vkDestroyImage on the swapchain image handles, since these are owned by the swapchain itself. 
-	// (We do need to destroy the image views, since we created those ourselves.)
-	// deallocate the swapchain and (thus) its images:
-	if (swapchain != VK_NULL_HANDLE) {
-		vkDestroySwapchainKHR(device, swapchain, nullptr);
-		swapchain = VK_NULL_HANDLE;
+	if (configuration.headless) {
+		//destroy the headless swapchain with its images and buffers
+		for (auto &h : headless_swapchain) {
+			helpers.destroy_image(std::move(h.image));
+
+			// destroys a VkBuffer - a chunk of GPU memory used
+			// to store data. In this headless swapchain context, h.buffer is used to  
+			// hold the rendered image data that gets copied from the GPU image to      
+			// CPU-readable memory.   
+			helpers.destroy_buffer(std::move(h.buffer));
+			
+			h.copy_command = VK_NULL_HANDLE; //pool deallocated below
+			vkDestroyFence(device, h.image_presented, nullptr);
+			h.image_presented = VK_NULL_HANDLE;
+		}
+		headless_swapchain.clear();
+
+		// destroy headless_command_pool:
+		// Notice that we don't bother to free the individual command buffers, since we're about to destroy the whole pool anyway
+		//free all of the copy command buffers (VkCommandBuffer objects) by destroying the pool from which they were allocated:
+		vkDestroyCommandPool(device, headless_command_pool, nullptr);
+		headless_command_pool = VK_NULL_HANDLE;
+	} else {
+		// we don't need to call vkDestroyImage on the swapchain image handles, since these are owned by the swapchain itself. 
+		// (We do need to destroy the image views, since we created those ourselves.)
+		// deallocate the swapchain and (thus) its images:
+		if (swapchain != VK_NULL_HANDLE) {
+			vkDestroySwapchainKHR(device, swapchain, nullptr);
+			swapchain = VK_NULL_HANDLE;
+		}
 	}
 }
 
@@ -925,6 +949,8 @@ void RTG::run(Application &application) {
 	glfwSetScrollCallback(window, scroll_callback);
 	glfwSetKeyCallback(window, key_callback);
 
+	uint32_t headless_next_image = 0;
+
 	// setup time handling:
 	std::chrono::high_resolution_clock::time_point before = std::chrono::high_resolution_clock::now();
 
@@ -939,15 +965,14 @@ void RTG::run(Application &application) {
 		event_queue.clear();
 
 		{ // elapsed time handling
-				std::chrono::high_resolution_clock::time_point after = std::chrono::high_resolution_clock::now();
+			std::chrono::high_resolution_clock::time_point after = std::chrono::high_resolution_clock::now();
 
-				// - At 60 FPS: dt ≈ 0.0167 seconds (~16.7 ms)                                                              
-  				// - At 30 FPS: dt ≈ 0.0333 seconds (~33.3 ms) 
-				float dt = float(std::chrono::duration< double >(after - before).count()); // seconds passed (in float)
-				before = after;
-				dt = std::min(dt, 0.1f); // lag if frame wrate dips too slow
-				application.update(dt); // the Tutorial::update(float dt)
-
+			// - At 60 FPS: dt ≈ 0.0167 seconds (~16.7 ms)                                                              
+  			// - At 30 FPS: dt ≈ 0.0333 seconds (~33.3 ms) 
+			float dt = float(std::chrono::duration< double >(after - before).count()); // seconds passed (in float)
+			before = after;
+			dt = std::min(dt, 0.1f); // lag if frame wrate dips too slow
+			application.update(dt); // the Tutorial::update(float dt)
 		}
 
 		// render handling (with on_swapchain as needed):
@@ -967,26 +992,44 @@ void RTG::run(Application &application) {
 		}
 
 		uint32_t image_index = -1U;
-		// acquire an image (resize swapchain if needed):
-retry:          
-		// ask the swapchain for the next image index - note careful return handling:
-		if (VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, workspaces[workspace_index].image_available, VK_NULL_HANDLE, &image_index); 
-			result == VK_ERROR_OUT_OF_DATE_KHR) {
-			// if the swapchain is out-of-date, 
-			std::cerr << "Recreating swapchain because vkAquireNextImageKHR returned" << string_VkResult(result) << "." << std::endl; // what is std::cerr //??
-			
-			// recreate it.
-			// These two functions work together when the swapchain becomes invalid (e.g., window resize):  
-			recreate_swapchain(); // Destroys the old swapchain and creates a new one with updated parameters. manages RTG's internal Vulkan resources   
-			on_swapchain(); // Calls the application's on_swapchain method to let it recreate any resources dependent on the swapchain (like framebuffers). manages Application's dependent resources
 
-			goto retry; // and run the loop again
-		} else if (result == VK_SUBOPTIMAL_KHR) {
-			// if the swapchain is suboptimal, render to it and recreate it later:
-			std::cerr << "Suboptimal swapchain format - ignoring for the moment." << std::endl;
-		} else if (result != VK_SUCCESS) {
-			// other non-success results are genuine errors:
-			throw std::runtime_error("Failed to acquire swapchain image (" + std::string(string_VkResult(result)) + ")!");
+		if (configuration.headless) {
+			assert(swapchain == VK_NULL_HANDLE);
+
+			//acquire the least-recently-used headless swapchain image:
+			assert(headless_next_image < uint32_t(headless_swapchain.size()));
+			image_index = headless_next_image;
+			headless_next_image = (headless_next_image + 1) % uint32_t(headless_swapchain.size());
+
+			//TODO: wait for image to be done copying to buffer
+
+			//TODO: save buffer, if needed
+
+			//TODO: mark next copy as pending
+
+			//TODO: signal GPU that image is "available for rendering to"
+		} else {
+			// acquire an image (resize swapchain if needed):
+			retry:          
+			// ask the swapchain for the next image index - note careful return handling:
+			if (VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, workspaces[workspace_index].image_available, VK_NULL_HANDLE, &image_index); 
+				result == VK_ERROR_OUT_OF_DATE_KHR) {
+				// if the swapchain is out-of-date, 
+				std::cerr << "Recreating swapchain because vkAquireNextImageKHR returned" << string_VkResult(result) << "." << std::endl; // what is std::cerr //??
+				
+				// recreate it.
+				// These two functions work together when the swapchain becomes invalid (e.g., window resize):  
+				recreate_swapchain(); // Destroys the old swapchain and creates a new one with updated parameters. manages RTG's internal Vulkan resources   
+				on_swapchain(); // Calls the application's on_swapchain method to let it recreate any resources dependent on the swapchain (like framebuffers). manages Application's dependent resources
+
+				goto retry; // and run the loop again
+			} else if (result == VK_SUBOPTIMAL_KHR) {
+				// if the swapchain is suboptimal, render to it and recreate it later:
+				std::cerr << "Suboptimal swapchain format - ignoring for the moment." << std::endl;
+			} else if (result != VK_SUCCESS) {
+				// other non-success results are genuine errors:
+				throw std::runtime_error("Failed to acquire swapchain image (" + std::string(string_VkResult(result)) + ")!");
+			}
 		}
 
 		//call render function: //?? is this the correct place for it

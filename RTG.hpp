@@ -127,8 +127,8 @@ struct RTG {
 	VkCommandPool headless_command_pool = VK_NULL_HANDLE;
 	struct HeadlessSwapchainImage {
 		Helpers::AllocatedImage image; //on-GPU rendering target
-		Helpers::AllocatedBuffer buffer; //host memory to copy image to after rendering
-		VkCommandBuffer copy_command = VK_NULL_HANDLE; //copy image -> buffer
+		Helpers::AllocatedBuffer buffer; //host memory to copy image to after rendering; CPU-readable copy of the frame data
+		VkCommandBuffer copy_command = VK_NULL_HANDLE; // records the GPU commands to copy image to buffer
 		VkFence image_presented = VK_NULL_HANDLE; //fence to signal after copy finishes
 	};
 	std::vector< HeadlessSwapchainImage > headless_swapchain;
