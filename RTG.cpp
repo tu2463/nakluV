@@ -1001,13 +1001,21 @@ void RTG::run(Application &application) {
 			image_index = headless_next_image;
 			headless_next_image = (headless_next_image + 1) % uint32_t(headless_swapchain.size());
 
-			//TODO: wait for image to be done copying to buffer
+			//wait for image to be done copying to buffer
+			VK( vkWaitForFences(device, 1, &headless_swapchain[image_index].image_presented, VK_TRUE, UINT64_MAX) );
 
 			//TODO: save buffer, if needed
 
-			//TODO: mark next copy as pending
+			// mark next copy as pending
+			VK( vkResetFences(device, 1, &headless_swapchain[image_index].image_presented) );
 
-			//TODO: signal GPU that image is "available for rendering to"
+			//signal GPU that image is "available for rendering to"
+			VkSubmitInfo submit_info{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.signalSemaphoreCount = 1,
+				.pSignalSemaphores = &workspaces[workspace_index].image_available
+			};
+			VK( vkQueueSubmit(graphics_queue, 1, &submit_info, nullptr) );
 		} else {
 			// acquire an image (resize swapchain if needed):
 			retry:          
