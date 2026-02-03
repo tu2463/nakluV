@@ -96,7 +96,7 @@ struct RTG {
 	VkDevice device = VK_NULL_HANDLE;
 
 	//queue for graphics and transfer operations:
-	std::optional< uint32_t > graphics_queue_family;
+	std::optional< uint32_t > graphics_queue_family; // std::optional< uint32_t > allows us to check them as bools (testing if they contain a value) and set them to indices.
 	VkQueue graphics_queue = VK_NULL_HANDLE;
 
 	//queue for present operations:

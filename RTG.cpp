@@ -318,17 +318,98 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		}();
 	}
 
-	//create the `device` (logical interface to the GPU) and the `queue`s to which we can submit commands:
-	refsol::RTG_constructor_create_device(
-		configuration.debug,
-		physical_device,
-		surface,
-		&device,
-		&graphics_queue_family,
-		&graphics_queue,
-		&present_queue_family,
-		&present_queue
-	);
+	{ //create the `device` (logical interface to the GPU) and the `queue`s to which we can submit commands:
+		// refsol::RTG_constructor_create_device(
+		// 	configuration.debug,
+		// 	physical_device,
+		// 	surface,
+		// 	&device,
+		// 	&graphics_queue_family,
+		// 	&graphics_queue,
+		// 	&present_queue_family,
+		// 	&present_queue
+		// );
+
+		{ //look up queue indices; getting handles to the queues we will be submitting work on:
+			uint32_t count = 0;
+			vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &count, nullptr);
+			std::vector< VkQueueFamilyProperties > queue_families(count); // Queues come from various families. So we list all of the queue families
+			vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &count, queue_families.data());
+
+			// We need to find a queue family (index) that supports graphics, and one that we can use to present on the supplied surface.
+			// so we check for the desired properties on each queue family:
+			for (auto const &queue_family : queue_families) {
+				uint32_t i = uint32_t(&queue_family - &queue_families[0]);
+
+				//if it does graphics, set the graphics queue family:
+				if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+					if (!graphics_queue_family) graphics_queue_family = i; // std::optional< uint32_t > type allows us to check them as bools (testing if they contain a value) and set them to indices.
+				}
+
+				//if it has present support, set the present queue family:
+				VkBool32 present_support = VK_FALSE;
+				VK( vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support) );
+				if (present_support == VK_TRUE) {
+					if (!present_queue_family) present_queue_family = i;
+				}
+			}
+
+			if (!graphics_queue_family) {
+				throw std::runtime_error("No queue with graphics support.");
+			}
+
+			if (!present_queue_family) {
+				throw std::runtime_error("No queue with present support.");
+			}
+		}
+
+		//select device extensions:
+		std::vector< const char * > device_extensions;
+		#if defined(__APPLE__)
+		device_extensions.emplace_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+		#endif
+		//Add the swapchain extension:
+		device_extensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
+		{ //create the logical device - the root of all our application-specific Vulkan resources
+			std::vector< VkDeviceQueueCreateInfo > queue_create_infos;
+			std::set< uint32_t > unique_queue_families{
+				graphics_queue_family.value(),
+				present_queue_family.value()
+			};
+
+			float queue_priorities[1] = { 1.0f };
+			for (uint32_t queue_family : unique_queue_families) {
+				queue_create_infos.emplace_back(VkDeviceQueueCreateInfo{
+					.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+					.queueFamilyIndex = queue_family,
+					.queueCount = 1,
+					.pQueuePriorities = queue_priorities,
+				});
+			}
+
+			VkDeviceCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+				.queueCreateInfoCount = uint32_t(queue_create_infos.size()),
+				.pQueueCreateInfos = queue_create_infos.data(),
+
+				//device layers are depreciated; spec suggests passing instance_layers or nullptr:
+				.enabledLayerCount = 0,
+				.ppEnabledLayerNames = nullptr,
+
+				.enabledExtensionCount = static_cast< uint32_t>(device_extensions.size()),
+				.ppEnabledExtensionNames = device_extensions.data(),
+
+				//pass a pointer to a VkPhysicalDeviceFeatures to request specific features: (e.g., thick lines)
+				.pEnabledFeatures = nullptr,
+			};
+
+			VK( vkCreateDevice(physical_device, &create_info, nullptr, &device) );
+
+			vkGetDeviceQueue(device, graphics_queue_family.value(), 0, &graphics_queue);
+			vkGetDeviceQueue(device, present_queue_family.value(), 0, &present_queue);
+		}
+	}
 
 	//run any resource creation required by Helpers structure:
 	helpers.create();
