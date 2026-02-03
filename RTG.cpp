@@ -266,16 +266,57 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		}
 	}
 
-	//select the `surface_format` and `present_mode` which control how colors are represented on the surface and how new images are supplied to the surface:
-	refsol::RTG_constructor_select_format_and_mode(
-		configuration.debug,
-		configuration.surface_formats,
-		configuration.present_modes,
-		physical_device,
-		surface,
-		&surface_format,
-		&present_mode
-	);
+	{ //select the `surface_format` and `present_mode` which control how colors are represented on the surface and how new images are supplied to the surface:
+		// refsol::RTG_constructor_select_format_and_mode(
+		// 	configuration.debug,
+		// 	configuration.surface_formats,
+		// 	configuration.present_modes,
+		// 	physical_device,
+		// 	surface,
+		// 	&surface_format,
+		// 	&present_mode
+		// );
+		std::vector< VkSurfaceFormatKHR > formats;
+		std::vector< VkPresentModeKHR > present_modes;
+		
+		{
+			uint32_t count = 0;
+			VK( vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &count, nullptr) );
+			formats.resize(count);
+			VK( vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &count, formats.data()) );
+		}
+
+		{
+			uint32_t count = 0;
+			VK( vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &count, nullptr) );
+			present_modes.resize(count);
+			VK( vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device, surface, &count, present_modes.data()) );
+		}
+
+		//find first available surface format matching config:
+		surface_format = [&](){
+			for (auto const &config_format : configuration.surface_formats) {
+				for (auto const &format : formats) {
+					if (config_format.format == format.format && config_format.colorSpace == format.colorSpace) {
+						return format;
+					}
+				}
+			}
+			throw std::runtime_error("No format matching requested format(s) found.");
+		}();
+
+		//find first available present mode matching config:
+		present_mode = [&](){
+			for (auto const &config_mode : configuration.present_modes) {
+				for (auto const &mode : present_modes) {
+					if (config_mode == mode) {
+						return mode;
+					}
+				}
+			}
+			throw std::runtime_error("No present mode matching requested mode(s) found.");
+		}();
+	}
 
 	//create the `device` (logical interface to the GPU) and the `queue`s to which we can submit commands:
 	refsol::RTG_constructor_create_device(
