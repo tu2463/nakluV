@@ -54,6 +54,26 @@ void RTG::Configuration::usage(std::function< void(const char *, const char *) >
 	callback("--drawing-size <w> <h>", "Set the size of the surface to draw to.");
 }
 
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+	VkDebugUtilsMessageTypeFlagsEXT type,
+	const VkDebugUtilsMessengerCallbackDataEXT *data,
+	void *user_data
+) {
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+		std::cerr << "\x1b[91m" << "E: "; // TODO: understandt that this is ANSI escape code; these escape codes will ensure that compliant terminals print our error logging messages in color.
+	} else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+		std::cerr << "\x1b[33m" << "w: ";
+	} else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+		std::cerr << "\x1b[90m" << "i: ";
+	} else { //VERBOSE
+		std::cerr << "\x1b[90m" << "v: ";
+	}
+	std::cerr << data->pMessage << "\x1b[0m" << std::endl;
+
+	return VK_FALSE;
+}
+
 RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 
 	//copy input configuration:
@@ -61,13 +81,75 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 
 	//fill in flags/extensions/layers information:
 
-	//create the `instance` (main handle to Vulkan library):
-	refsol::RTG_constructor_create_instance(
-		configuration.application_info,
-		configuration.debug,
-		&instance,
-		&debug_messenger
-	);
+	{ //create the `instance` (main handle to Vulkan library):
+		// refsol::RTG_constructor_create_instance(
+		// 	configuration.application_info,
+		// 	configuration.debug,
+		// 	&instance,
+		// 	&debug_messenger
+		// );
+		VkInstanceCreateFlags instance_flags = 0;
+		
+		// ┌─────────┬─────────┬─────────┐                                                                          
+		// │ ptr[0]  │ ptr[1]  │ ptr[2]  │                                                                          
+		// └────┬────┴────┬────┴────┬────┘                                                                          
+		// 	│         │         │                                                                               
+		// 	▼         ▼         ▼                                                                               
+		// 	"VK_KHR_surface"  "VK_EXT_debug_utils"  "VK_KHR_swapchain"                                            
+     	// (string in memory) (string in memory)    (string in memory)  
+		std::vector< const char * > instance_extensions; // what does the * syntax mean //vv this vec holds pointers to constant character(s)  
+		std::vector< const char * > instance_layers;
+
+		// add extensions for MoltenVK portability layer on macOS
+		// First, the portability layer extensions (which are only needed on macOS). 
+		// These allow our app to work on macOS through the MoltenVK translation layer between Vulkan and Metal. 
+		#if defined(__APPLE__)
+		instance_flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR; // Tells Vulkan to include "portability" devices (MoltenVK) when enumerating GPUs 
+
+		instance_extensions.emplace_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME); // Required extension for the above flag to work 
+		instance_extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME); // Base surface extension for presenting to window
+		instance_extensions.emplace_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME); // Creates Vulkan surfaces from Metal layers (macOS-specific)
+		#endif
+
+		//add extensions and layers for debugging:
+		if (configuration.debug) {
+			instance_extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME); // what's this //vv allows us to get debug messages delivered to a callback of our choosing; a Vulkan extension that provides the infrastructure for receiving debug messages.
+			instance_layers.emplace_back("VK_LAYER_KHRONOS_validation"); // what's this //vv check that our Vulkan usage comports(aligns) with the specification
+		}
+
+		{ //add extensions needed by glfw:
+			glfwInit();
+			if (!glfwVulkanSupported()) { // tells us if the GLFW version we're using can actually do things with Vulkan
+				throw std::runtime_error("GLFW reports Vulkan is not supported.");
+			}
+
+			uint32_t count;
+			// returns an array of extensions that GLFW wants:
+			const char **extensions = glfwGetRequiredInstanceExtensions(&count); // how to understand the ** syntax //vv a pointer to an array of pointers to constant character(s)
+			if (extensions == nullptr) {
+				throw std::runtime_error("GLFW failed to return a list of requested instance extensions. Perhaps it was not compiled with Vulkan support.");
+			}
+			for (uint32_t i = 0; i < count; ++i) {
+				instance_extensions.emplace_back(extensions[i]);
+			}
+		}
+
+		//TODO: write debug messenger structure
+
+		VkInstanceCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+			.pNext = nullptr, // TODO: pass debug structure if configured
+			.flags = instance_flags, //  Platform-specific flags (e.g., VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR for MoltenVK on macOS).
+			.pApplicationInfo = &configuration.application_info, // App name, version, engine name, Vulkan API version. Helps drivers optimize for known apps.
+			.enabledLayerCount = uint32_t(instance_layers.size()), // How many validation/debug layers to enable. 
+			.ppEnabledLayerNames = instance_layers.data(), //  Array of layer names like "VK_LAYER_KHRONOS_validation".  
+			.enabledExtensionCount = uint32_t(instance_extensions.size()), // How many instance extensions to enable.
+			.ppEnabledExtensionNames = instance_extensions.data() // Array of extension names like "VK_KHR_surface", "VK_EXT_debug_utils". 
+		};
+		VK( vkCreateInstance(&create_info, nullptr, &instance) );
+
+		//TODO: create debug messenger
+	}
 
 	//create the `window` and `surface` (where things get drawn):
 	refsol::RTG_constructor_create_surface(
