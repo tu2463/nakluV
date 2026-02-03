@@ -119,7 +119,20 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 	//create workspace resources:
 	workspaces.resize(configuration.workspaces);
 	for (auto &workspace : workspaces) {
-		refsol::RTG_constructor_per_workspace(device, &workspace);
+		// refsol::RTG_constructor_per_workspace(device, &workspace);
+		{ // create workspace fences:
+				VkFenceCreateInfo create_info{
+					.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+					.flags = VK_FENCE_CREATE_SIGNALED_BIT, // start signaled, because all workspaces are available to start
+				};
+				VK( vkCreateFence(device, &create_info, nullptr, &workspace.workspace_available) );
+		}
+		{ // create workspace semaphores:
+			VkSemaphoreCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+			};
+			VK( vkCreateSemaphore(device, &create_info, nullptr, &workspace.image_available) );
+		}
 	}
 
 }
