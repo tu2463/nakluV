@@ -1050,7 +1050,25 @@ void RTG::run(Application &application) {
 			.workspace_available = workspaces[workspace_index].workspace_available,
 		});
 
-		{ // queue the rendering work for presentation:
+		// queue the rendering work for presentation:
+		 if (configuration.headless) {
+			//in headless mode, submit the copy command we recorded previously:
+
+			//will wait in the transfer stage for image_done to be signaled:
+			VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			VkSubmitInfo submit_info{
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.waitSemaphoreCount = 1,
+				.pWaitSemaphores = &swapchain_image_dones[image_index],
+				.pWaitDstStageMask = &wait_stage,
+				.commandBufferCount = 1,
+				.pCommandBuffers = &headless_swapchain[image_index].copy_command, // kicks off the copy command buffer
+			};
+			
+			// submit GPU work that waits for the image to be done rendering, 
+			VK( vkQueueSubmit(graphics_queue, 1, &submit_info, headless_swapchain[image_index].image_presented) ); // signals the copy-finished fence
+
+		} else { 
 			VkPresentInfoKHR present_info{
 				.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 				.waitSemaphoreCount = 1, 
