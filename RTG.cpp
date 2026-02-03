@@ -146,7 +146,15 @@ RTG::~RTG() {
 
 	//destroy workspace resources:
 	for (auto &workspace : workspaces) {
-		refsol::RTG_destructor_per_workspace(device, &workspace);
+		// refsol::RTG_destructor_per_workspace(device, &workspace);
+		if (workspace.workspace_available != VK_NULL_HANDLE) {
+			vkDestroyFence(device, workspace.workspace_available, nullptr);
+			workspace.workspace_available = VK_NULL_HANDLE;
+		}
+		if (workspace.image_available != VK_NULL_HANDLE) {
+			vkDestroySemaphore(device, workspace.image_available, nullptr);
+			workspace.image_available = VK_NULL_HANDLE;
+		}
 	}
 	workspaces.clear();
 
