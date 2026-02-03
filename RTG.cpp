@@ -134,11 +134,25 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 			}
 		}
 
-		//TODO: write debug messenger structure
+		// write debug messenger structure
+		VkDebugUtilsMessengerCreateInfoEXT debug_messenger_create_info{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.messageSeverity =
+				VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			.messageType =
+				VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+				| VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			.pfnUserCallback = debug_callback,
+			.pUserData = nullptr
+		};
 
 		VkInstanceCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-			.pNext = nullptr, // TODO: pass debug structure if configured
+			.pNext = (configuration.debug ? &debug_messenger_create_info : nullptr), // pass debug structure if configured
 			.flags = instance_flags, //  Platform-specific flags (e.g., VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR for MoltenVK on macOS).
 			.pApplicationInfo = &configuration.application_info, // App name, version, engine name, Vulkan API version. Helps drivers optimize for known apps.
 			.enabledLayerCount = uint32_t(instance_layers.size()), // How many validation/debug layers to enable. 
@@ -148,18 +162,35 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		};
 		VK( vkCreateInstance(&create_info, nullptr, &instance) );
 
-		//TODO: create debug messenger
+		// create debug messenger
+		if (configuration.debug) {
+			PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+			if (!vkCreateDebugUtilsMessengerEXT) {
+				throw std::runtime_error("Failed to lookup debug utils create fn.");
+			}
+			VK( vkCreateDebugUtilsMessengerEXT(instance, &debug_messenger_create_info, nullptr, &debug_messenger) );
+		}
 	}
 
-	//create the `window` and `surface` (where things get drawn):
-	refsol::RTG_constructor_create_surface(
-		configuration.application_info,
-		configuration.debug,
-		configuration.surface_extent,
-		instance,
-		&window,
-		&surface
-	);
+	{ //create the `window` and `surface` (where things get drawn):
+		// refsol::RTG_constructor_create_surface(
+		// 	configuration.application_info,
+		// 	configuration.debug,
+		// 	configuration.surface_extent,
+		// 	instance,
+		// 	&window,
+		// 	&surface
+		// );
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+		window = glfwCreateWindow(configuration.surface_extent.width, configuration.surface_extent.height, configuration.application_info.pApplicationName, nullptr, nullptr);
+
+		if (!window) {
+			throw std::runtime_error("GLFW failed to create a window.");
+		}
+
+		VK( glfwCreateWindowSurface(instance, window, nullptr, &surface) );
+	}
 
 	//select the `physical_device` -- the gpu that will be used to draw:
 	refsol::RTG_constructor_select_physical_device(
