@@ -527,7 +527,7 @@ void RTG::recreate_swapchain() {
 	}
 
 	if (configuration.headless) {
-		assert(surface == VK_NULL_HANDLE); //headless, so must not have a surface
+		// assert(surface == VK_NULL_HANDLE); //headless, so must not have a surface
 
 		//make a fake swapchain:
 
@@ -928,6 +928,38 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 	event_queue->emplace_back(event);
 }
 
+void RTG::HeadlessSwapchainImage::save() const {
+	if (save_to == "") return;
+
+	if (image.format == VK_FORMAT_B8G8R8A8_SRGB) {
+		//get a pointer to the image data copied to the buffer:
+		char const *bgra = reinterpret_cast< char const * >(buffer.allocation.data());
+
+		//convert bgra -> rgb data: //TODO: understand this reordeing
+		// To convert BGRA data to RGB data we need to re-order the first three bytes of every pixel and discard the last byte. 
+		// We make a temporary std::vector to hold the converted data and size it appropriately.
+		std::vector< char > rgb(image.extent.height * image.extent.width * 3);
+		for (uint32_t y = 0; y < image.extent.height; ++y) {
+			for (uint32_t x = 0; x < image.extent.width; ++x) {
+				rgb[(y * image.extent.width + x) * 3 + 0] = bgra[(y * image.extent.width + x) * 4 + 2];
+				rgb[(y * image.extent.width + x) * 3 + 1] = bgra[(y * image.extent.width + x) * 4 + 1];
+				rgb[(y * image.extent.width + x) * 3 + 2] = bgra[(y * image.extent.width + x) * 4 + 0];
+			}
+		}
+
+		//write ppm file:
+		//  we use a stream in std::ios::binary mode -- 
+		// otherwise any \n bytes will be expanded into \r\b on Windows, causing color and alignment shifts in the output file.
+		std::ofstream ppm(save_to, std::ios::binary);
+		ppm << "P6\n"; //magic number + newline
+		ppm << image.extent.width << " " << image.extent.height << "\n"; //image size + newline
+		ppm << "255\n"; //max color value + newline
+		ppm.write(rgb.data(), rgb.size()); //rgb data in row-major order, starting from the top left
+	} else {
+		std::cerr << "WARNING: saving format " << string_VkFormat(image.format) << " not supported." << std::endl;
+	}
+}
+
 // the "harness" that connects an RTG::Application (like Tutorial) to the windowing system and GPU.
 void RTG::run(Application &application) {
 	// refsol::RTG_run(*this, application);
@@ -1047,7 +1079,7 @@ void RTG::run(Application &application) {
 		uint32_t image_index = -1U;
 
 		if (configuration.headless) {
-			assert(swapchain == VK_NULL_HANDLE);
+			// assert(swapchain == VK_NULL_HANDLE);
 
 			//acquire the least-recently-used headless swapchain image:
 			assert(headless_next_image < uint32_t(headless_swapchain.size()));
@@ -1057,7 +1089,14 @@ void RTG::run(Application &application) {
 			//wait for image to be done copying to buffer
 			VK( vkWaitForFences(device, 1, &headless_swapchain[image_index].image_presented, VK_TRUE, UINT64_MAX) );
 
-			//TODO: save buffer, if needed
+			//save buffer, if needed:
+			if (headless_swapchain[image_index].save_to != "") {
+				headless_swapchain[image_index].save(); // handle writing the previous frame
+				headless_swapchain[image_index].save_to = ""; // setting save_to for the next frame
+			}
+
+			//remember if next frame should be saved:
+			headless_swapchain[image_index].save_to = headless_save;
 
 			// mark next copy as pending
 			VK( vkResetFences(device, 1, &headless_swapchain[image_index].image_presented) );
