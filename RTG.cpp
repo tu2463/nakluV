@@ -292,6 +292,8 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 			throw std::runtime_error("Configured present modes do not contain VK_PRESENT_MODE_FIFO_KHR.");
 		}
 		present_mode = VK_PRESENT_MODE_FIFO_KHR;
+
+		present_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	} else {
 		// refsol::RTG_constructor_select_format_and_mode(
 		// 	configuration.debug,
@@ -342,6 +344,8 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 			}
 			throw std::runtime_error("No present mode matching requested mode(s) found.");
 		}();
+
+		present_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 
 	{ //create the `device` (logical interface to the GPU) and the `queue`s to which we can submit commands:

@@ -38,7 +38,7 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE, // No stencil buffer
 				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
 				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, // Don't care about old contents // what layout (.initialLayout) the image will be transitioned to before the load
-				.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, // Prepare for display // what layout (.finalLayout) the image will be transitioned to after the store.
+				.finalLayout = rtg.present_layout, // Prepare for display // what layout (.finalLayout) the image will be transitioned to after the store.
 			},
 			VkAttachmentDescription{ // depth attachment:
 				.format = depth_format,

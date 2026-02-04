@@ -115,6 +115,7 @@ struct RTG {
 	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	VkSurfaceFormatKHR surface_format{};
 	VkPresentModeKHR present_mode{};
+	VkImageLayout present_layout = VK_IMAGE_LAYOUT_UNDEFINED; //layout to put images in after render
 
 	//-------------------------------------------------
 	//Stuff used by 'run' to run the main loop (swapchain and workspaces):
