@@ -1219,6 +1219,23 @@ void RTG::run(Application &application) {
 		//TODO: present image (resize swapchain if needed)
 	}
 
+	//wait for any in-flight "headless" frames marked for saving to finish:
+	if (configuration.headless) {
+		for (size_t i = 0; i < headless_swapchain.size(); ++i) {
+			uint32_t image_index = headless_next_image;
+			headless_next_image = (headless_next_image + 1) % uint32_t(headless_swapchain.size());
+
+			//block until the image is finished being "presented" (copied-to-host):
+			VK( vkWaitForFences(device, 1, &headless_swapchain[image_index].image_presented, VK_TRUE, UINT64_MAX) );
+
+			//save if requested:
+			if (headless_swapchain[image_index].save_to != "") {
+				headless_swapchain[image_index].save();
+				headless_swapchain[image_index].save_to = "";
+			}
+		}
+	}
+	
 	// tear down event handling
 	if (!configuration.headless) {
 		glfwSetCursorPosCallback(window, nullptr);
