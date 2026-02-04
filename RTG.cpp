@@ -123,7 +123,7 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 			instance_layers.emplace_back("VK_LAYER_KHRONOS_validation"); // what's this //vv check that our Vulkan usage comports(aligns) with the specification
 		}
 
-		{ //add extensions needed by glfw:
+		if (!configuration.headless) { //add extensions needed by glfw:
 			glfwInit();
 			if (!glfwVulkanSupported()) { // tells us if the GLFW version we're using can actually do things with Vulkan
 				throw std::runtime_error("GLFW reports Vulkan is not supported.");
@@ -178,7 +178,7 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		}
 	}
 
-	{ //create the `window` and `surface` (where things get drawn):
+	if (!configuration.headless) { //create the `window` and `surface` (where things get drawn):
 		// refsol::RTG_constructor_create_surface(
 		// 	configuration.application_info,
 		// 	configuration.debug,
@@ -272,7 +272,27 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		}
 	}
 
-	{ //select the `surface_format` and `present_mode` which control how colors are represented on the surface and how new images are supplied to the surface:
+	//select the `surface_format` and `present_mode` which control how colors are represented on the surface and how new images are supplied to the surface:
+	if (configuration.headless) {
+		//in headless mode, just use the first requested format:
+		if (configuration.surface_formats.empty()) {
+			throw std::runtime_error("No surface formats requested.");
+		}
+		surface_format = configuration.surface_formats[0];
+
+		//headless mode will always use VK_PRESENT_MODE_FIFO_KHR, so make sure that's an option:
+		bool have_fifo = false;
+		for (auto const &mode : configuration.present_modes) {
+			if (mode == VK_PRESENT_MODE_FIFO_KHR) {
+				have_fifo = true;
+				break;
+			}
+		}
+		if (!have_fifo) {
+			throw std::runtime_error("Configured present modes do not contain VK_PRESENT_MODE_FIFO_KHR.");
+		}
+		present_mode = VK_PRESENT_MODE_FIFO_KHR;
+	} else {
 		// refsol::RTG_constructor_select_format_and_mode(
 		// 	configuration.debug,
 		// 	configuration.surface_formats,
@@ -351,13 +371,20 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 				if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 					if (!graphics_queue_family) graphics_queue_family = i; // std::optional< uint32_t > type allows us to check them as bools (testing if they contain a value) and set them to indices.
 				}
-
-				//if it has present support, set the present queue family:
-				VkBool32 present_support = VK_FALSE;
-				VK( vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support) );
-				if (present_support == VK_TRUE) {
-					if (!present_queue_family) present_queue_family = i;
+				
+				if (!configuration.headless) { // the call to check for presentation support is part of the WSI extension
+					//if it has present support, set the present queue family:
+					VkBool32 present_support = VK_FALSE;
+					VK( vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &present_support) );
+					if (present_support == VK_TRUE) {
+						if (!present_queue_family) present_queue_family = i;
+					}
 				}
+			}
+
+			//in headless mode, "present" (copy-to-host) on the graphics queue:
+			if (configuration.headless) {
+				present_queue_family = graphics_queue_family;
 			}
 
 			if (!graphics_queue_family) {
@@ -374,8 +401,10 @@ RTG::RTG(Configuration const &configuration_) : helpers(*this) {
 		#if defined(__APPLE__)
 		device_extensions.emplace_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
 		#endif
-		//Add the swapchain extension:
-		device_extensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+		if (!configuration.headless) { // we shouldn't be requesting the swapchain extension in headless mode:
+			//Add the swapchain extension:
+			device_extensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+		}
 
 		{ //create the logical device - the root of all our application-specific Vulkan resources
 			std::vector< VkDeviceQueueCreateInfo > queue_create_infos;
