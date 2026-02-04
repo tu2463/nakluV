@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <sstream>
+#include <fstream>
 #include <set>
 
 void RTG::Configuration::parse(int argc, char **argv) {
@@ -942,21 +944,68 @@ void RTG::run(Application &application) {
 
 	// setup event handling
 	std::vector< InputEvent > event_queue;
-	glfwSetWindowUserPointer(window, &event_queue);
+	if (!configuration.headless) {
+		glfwSetWindowUserPointer(window, &event_queue);
 
-	glfwSetCursorPosCallback(window, cursor_pos_callback);
-	glfwSetMouseButtonCallback(window, mouse_button_callback);
-	glfwSetScrollCallback(window, scroll_callback);
-	glfwSetKeyCallback(window, key_callback);
+		glfwSetCursorPosCallback(window, cursor_pos_callback);
+		glfwSetMouseButtonCallback(window, mouse_button_callback);
+		glfwSetScrollCallback(window, scroll_callback);
+		glfwSetKeyCallback(window, key_callback);
+	}
 
 	uint32_t headless_next_image = 0;
 
 	// setup time handling:
 	std::chrono::high_resolution_clock::time_point before = std::chrono::high_resolution_clock::now();
 
-	while (!glfwWindowShouldClose(window)) { // run until GLFW lets us know the window should be closed via the glfwWindowShouldClose call.
+	while (configuration.headless || !glfwWindowShouldClose(window)) { // run until GLFW lets us know the window should be closed via the glfwWindowShouldClose call.
+		float headless_dt = 0.0f;
+		std::string headless_save = "";
+		
 		// event handling
-		glfwPollEvents();
+		if (configuration.headless) {
+			//read events from stdin
+			std::string line;
+			while (std::getline(std::cin, line)) { // what is getline and std::cin //??
+				// parse event from line
+				try {
+					std::istringstream iss(line); // what are istringstream//??
+					iss.imbue(std::locale::classic()); //ensure floating point numbers always parse with '.' as the separator // what does this line do //??
+
+					// read type:
+					std::string type;
+					if (!(iss >> type)) throw std::runtime_error("failed to read event type");
+
+					// type-specific parsing:
+					if (type == "AVAILABLE") {  //AVAILABLE dt [save.ppm]
+						// read dt:
+						if (!(iss >> headless_dt)) throw std::runtime_error("failed to read dt");
+						if (headless_dt < 0.0f) throw std::runtime_error("dt less than zero");
+
+						// check for save file name:
+						if (iss >> headless_save) {
+							if (!headless_save.ends_with(".ppm")) throw std::runtime_error("output filename ("" + headless_save + "") must end with .ppm");
+						}
+
+						// check for trailing junk
+						char junk;
+						if (iss >> junk) throw std::runtime_error("trailing junk in event line");
+
+						//stop parsing events so a frame can draw
+						break;
+					} else {
+						throw std::runtime_error("unrecognized type");
+					}
+
+				} catch (std::exception &e) {
+					std::cerr << "WARNING: failed to parse event (" << e.what() << ") from: "" << line << ""; ignoring it." << std::endl;
+				}
+			}
+			//if we've run out of events, stop running the main loop:
+			if (!std::cin) break;
+		} else {
+			glfwPollEvents();
+		}
 
 		// deliver all input events to application:
 		for (InputEvent const &input : event_queue) {
@@ -972,6 +1021,10 @@ void RTG::run(Application &application) {
 			float dt = float(std::chrono::duration< double >(after - before).count()); // seconds passed (in float)
 			before = after;
 			dt = std::min(dt, 0.1f); // lag if frame wrate dips too slow
+
+			//in headless mode, override dt:
+			if (configuration.headless) dt = headless_dt;
+
 			application.update(dt); // the Tutorial::update(float dt)
 		}
 
@@ -1095,10 +1148,12 @@ void RTG::run(Application &application) {
 	}
 
 	// tear down event handling
-	glfwSetCursorPosCallback(window, nullptr);
-	glfwSetMouseButtonCallback(window, nullptr);
-	glfwSetScrollCallback(window, nullptr);
-	glfwSetKeyCallback(window, nullptr);
+	if (!configuration.headless) {
+		glfwSetCursorPosCallback(window, nullptr);
+		glfwSetMouseButtonCallback(window, nullptr);
+		glfwSetScrollCallback(window, nullptr);
+		glfwSetKeyCallback(window, nullptr);
 
-	glfwSetWindowUserPointer(window, nullptr);
+		glfwSetWindowUserPointer(window, nullptr);
+	}
 }
