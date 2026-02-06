@@ -1,5 +1,6 @@
 
 #include "RTG.hpp"
+#include "S72.hpp"
 
 #include "Tutorial.hpp"
 
@@ -35,6 +36,21 @@ int main(int argc, char **argv) {
 				std::cerr << "    " << arg << "\n        " << desc << std::endl;
 			});
 			return 1;
+		}
+
+		// load scene:
+		S72 s72;
+		try {
+			s72 = S72::load(configuration.scene_file);
+		} catch (std::exception &e) {
+			// - e — the caught exception object                                        
+			// - .what() — returns a const char* (C-string) containing the message passed when the exception was thrown  
+			std::cerr <<  "Failed to load s72-format scene from '" << configuration.scene_file << e.what() << std::endl;
+			return 1;
+		}
+
+		if (configuration.print_s72 == true) {
+			// TODO: print out some scene info
 		}
 
 		//loads vulkan library, creates surface, initializes helpers:

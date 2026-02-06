@@ -81,6 +81,10 @@ struct RTG {
 		Configuration() = default;
 		void parse(int argc, char **argv); //parse command-line options; throws on error
 		static void usage(std::function< void(const char *, const char *) > const &callback); //reports command line usage by passing flag and description to callback.
+
+		// A1-load: S72 loader
+		std::string scene_file = "";
+		bool print_s72 = false;
 	};
 
 	Configuration configuration; //configuration, as used (might have extra extensions, layers, or flags added)
@@ -204,5 +208,4 @@ struct RTG {
 		VkSemaphore image_done = VK_NULL_HANDLE; //this should be signal'd when the image is done being written to
 		VkFence workspace_available = VK_NULL_HANDLE; //this should be signal'd when *all* work is done for the frame
 	};
-
 };
