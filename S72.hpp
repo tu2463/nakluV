@@ -1,5 +1,7 @@
 #include "sejp.hpp"
 
+#include <vulkan/vulkan.h>
+
 #include <string>
 #include <vector>
 #include <optional>
@@ -59,7 +61,6 @@ struct S72 {
         quat rotation = quat{ .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 1.0f};
         vec3 scale = vec3{ .x = 1.0f, .y = 1.0f, .z = 1.0f};
         std::vector< Node * > children;
-        Camera *camera = nullptr;
 
         // optional, null of not specified:
         Mesh *mesh = nullptr;
@@ -69,23 +70,89 @@ struct S72 {
     };
     std::unordered_map< std::string, Node> nodes;
 
+    /* zero or more "MESH"s, all with unique names:
+    {
+        "type":"MESH",
+        "name":"cube",
+        "topology":"TRIANGLE_LIST",
+        "count":12,
+        "indices": { "src":"cube.b72", "offset":576, "format":"UINT32" },
+        "attributes":{
+            "POSITION": { "src":"cube.b72", "offset":0,  "stride":48, "format":"R32G32B32_SFLOAT" },
+            "NORMAL":   { "src":"cube.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+            "TANGENT":  { "src":"cube.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+            "TEXCOORD": { "src":"cube.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" },
+        },
+        "material":"dull-red",
+    },
+    */
     struct Mesh{
+        std::string name;
+        VkPrimitiveTopology topology;
+        uint32_t count;
+        struct Indices {
+            DataFile &src;
+            uint32_t offset;
+            VkIndexType format;
+        };
+        std::optional< Indices > indices; // mesh index stream, optional
+
+        struct Attribute {
+            DataFile &src;
+            uint32_t offset;
+            uint32_t stride;
+            VkFormat format;
+        };
+        std::unordered_map< std::string, Attribute > attributes;
+        Material *material = nullptr; // optional, null if not specified
+    };
+    std::unordered_map< std::string, Mesh> meshes;
+
+    struct DataFile {
 
     };
-    Mesh mesh;
+    //we organize the data files by "src" so that multiple attributes with the same src resolve to the same DataFile:
+	std::unordered_map< std::string, DataFile > data_files;
 
+    /* zero or more "CAMERA"s, all with unique names:
+    {
+        "type":"CAMERA",
+        "name":"main view",
+        "perspective":{
+            "aspect": 1.777,
+            "vfov": 1.04719,
+            "near": 0.1,
+            "far":10.0
+        }
+    },
+    */
     struct Camera{
-
+        std::string name;
+        struct Perspective {
+            float aspect;
+            float vfov;
+            float near;
+            float far = std::numeric_limits< float >::infinity(); // far clipping plane distance, optional, if not specified will be set to infinity
+        };
+		//(s72 leaves open the possibility of other camera projections, but does not define any)
+        std::variant< Perspective > perspective;
     };
-    Camera camera;
+    Camera cameras;
 
+    /* 
+    {
+        "type":"ENVIRONMENT",
+        "name":"sky",
+        "radiance": {"src":"sky.png", "type":"cube", "format":"rgbe"}
+    },
+    */
     struct Environment{
 
     };
-    Environment environment;
+    Environment environments;
 
     struct Light{
 
     };
-    Light light;
+    Light lights;
 };

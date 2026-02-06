@@ -75,7 +75,126 @@ S72 S72::load(std::string const &scene_file) {
             }
 
         } else if (type == "NODE") {
-            // TODO: node struct
+            //get a reference to the object we are parsing into:
+            Node &node = s72.nodes[name]; //NOTE: creates new (empty) node if not yet parsed; will check for this later 
+            
+            //check that we haven't already parsed this node's information:
+			if (node.name != "") {
+				throw std::runtime_error("Multiple \"NODE\" objects with name \"" + name + "\".");
+			}
+
+			//mark the node as parsed:
+			node.name = name;
+
+            if (auto f = object.find("translation"); f != object.end()) {
+                try {
+                    std::vector< sejp::value > const &vec = f->second.as_array().value();
+                    node.translation = vec3{
+                        .x = float(vec.at(0).as_number().value()),
+                        .y = float(vec.at(1).as_number().value()),
+                        .z = float(vec.at(2).as_number().value()),
+                    };
+                    if (vec.size() != 3) throw std::runtime_error("trailing values");
+                } catch (std::exception &) { 
+                    throw std::runtime_error("node \"" + name + "\"'s translation should be an array of three numbers.");
+                }
+                object.erase(f); // useful mainly for debugging unhandled properties; we will call warn_on_unhandled at end of loop iteration to check for any properties we forgot to parse
+            }
+
+            if (auto f = object.find("rotation"); f != object.end()) {
+				try {
+					std::vector< sejp::value > const &vec = f->second.as_array().value();
+					node.rotation = quat{
+						.x = float(vec.at(0).as_number().value()),
+						.y = float(vec.at(1).as_number().value()),
+						.z = float(vec.at(2).as_number().value()),
+						.w = float(vec.at(3).as_number().value()),
+					};
+					if (vec.size() != 4) throw std::runtime_error("trailing values");
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s rotation should be an array of four numbers.");
+				}
+				object.erase(f);
+			}
+
+			if (auto f = object.find("scale"); f != object.end()) {
+				try {
+					std::vector< sejp::value > const &vec = f->second.as_array().value();
+					node.scale = vec3{
+						.x = float(vec.at(0).as_number().value()),
+						.y = float(vec.at(1).as_number().value()),
+						.z = float(vec.at(2).as_number().value()),
+					};
+					if (vec.size() != 3) throw std::runtime_error("trailing values");
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s scale should be an array of three numbers.");
+				}
+				object.erase(f);
+			}
+
+            if (auto f = object.find("children"); f != object.end()) {
+                std::vector< std::string > refs; // will store the names of the children nodes
+				try {
+					std::vector< sejp::value > const &vec = f->second.as_array().value();
+                    for (auto const &value : vec) {
+                        refs.emplace_back(value.as_string().value());
+                    }
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s children should be an array of strings.");
+				}
+
+				//create/fixup pointers to other nodes:
+                node.children.reserve(refs.size());
+                for (auto const &ref : refs) {
+				    node.children.emplace_back(&s72.nodes[ref]); //NOTE: creates new (empty) nodes if not yet parsed; will check for this later
+                }
+				object.erase(f);
+			}
+
+            if (auto f = object.find("mesh"); f != object.end()) {
+                std::string ref;
+				try {
+					ref = f->second.as_string().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s mesh should be a string.");
+				}
+                node.mesh = &s72.meshes[ref];
+				object.erase(f);
+			}
+
+            if (auto f = object.find("camera"); f != object.end()) {
+                std::string ref;
+				try {
+					ref = f->second.as_string().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s camera should be a string.");
+				}
+                node.camera = &s72.cameras[ref];
+				object.erase(f);
+			}
+
+            if (auto f = object.find("environment"); f != object.end()) {
+				std::string ref;
+				try {
+					ref = f->second.as_string().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s environment should be a string.");
+				}
+				node.environment = &s72.environments[ref];
+				object.erase(f);
+			}
+
+			if (auto f = object.find("light"); f != object.end()) {
+				std::string ref;
+				try {
+					ref = f->second.as_string().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s light should be a string.");
+				}
+				node.light = &s72.lights[ref];
+				object.erase(f);
+			}
+
         } else if (type == "MESH") {
             // TODO: mesh struct
         } else if (type == "CAMERA") {
