@@ -1,5 +1,6 @@
 #include "S72.hpp"
 
+// The underscore distinguishes the raw pointer parameter from the nicer reference object created later in this fn
 std::string extract_string(std::map< std::string, sejp::value > *object_, std::string const &key, std::string const &what)
  {
     // TODO:
@@ -43,6 +44,36 @@ S72 S72::load(std::string const &scene_file) {
         if (type == "SCENE") {
 			//reference to the object we are parsing into:
             // TODO: handle scene, create scene struct
+            Scene &scene = s72.scene;
+
+            // check that we haven't already parsed the scene info (we will populate the *name* field for a new scene):
+            if (scene.name != "") {
+                throw std::runtime_error("Multiple \"SCENE\" objects in s72 file."); 
+            }
+
+            // mark scene as parsed:
+            scene.name = name;
+
+            // "roots":[...] (optional, default is []) -- array of references to nodes at which to start drawing the scene:
+            if (auto f = object.find("roots"); f != object.end()) {
+                std::vector< std::string > refs; // will store the names of the nodes that are scene roots
+                try {
+                    // f->first;   // the key: "roots"                                      
+                    // f->second;  // the value: the JSON array ["node A", "node B"] 
+                    std::vector< sejp::value > const &vec = f->second.as_array().value();
+                    for (auto const &value : vec) {
+                        refs.emplace_back(value.as_string().value());
+                    }
+                } catch (std::exception &) { // "&" instead of "&e", meaning we catch all exceptions but ignore the details, since we don't care why parsing failed, just that it did 
+                    throw std::runtime_error("Scene \"" + name + "\"'s roots are not an array of strings.");
+                }
+                scene.roots.reserve(refs.size());
+                for (auto const &ref : refs) {
+                    scene.roots.emplace_back(&s72.nodes[ref]); //NOTE: creates new (empty) nodes if not yet parsed; will check for this later
+                }
+                object.erase(f); // useful mainly for debugging unhandled properties; we will call warn_on_unhandled at end of loop iteration to check for any properties we forgot to parse
+            }
+
         } else if (type == "NODE") {
             // TODO: node struct
         } else if (type == "MESH") {
