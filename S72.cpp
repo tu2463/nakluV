@@ -316,7 +316,6 @@ S72 S72::load(std::string const &scene_file) {
 
         if (type == "SCENE") {
 			//reference to the object we are parsing into:
-            // TODO: handle scene, create scene struct
             Scene &scene = s72.scene;
 
             // check that we haven't already parsed the scene info (we will populate the *name* field for a new scene):
@@ -835,11 +834,159 @@ S72 S72::load(std::string const &scene_file) {
 				throw std::runtime_error("Material \"" + name + "\" does not have a brdf.");
 			}
         }  else if (type == "ENVIRONMENT") {
-            // TODO: ENVIRONMENT struct
+            Environment &environment = s72.environments[name];
+
+			//check that we haven't already parsed this:
+			if (environment.name != "") {
+				throw std::runtime_error("Multiple \"ENVIRONMENT\" objects with name \"" + name + "\".");
+			}
+
+			//mark as parsed:
+			environment.name = name;
+
+			environment.radiance = &extract_map(&object, "radiance", &s72, "Environment \"" + name + "\"'s radiance");
+
+			if (environment.radiance->type != Texture::Type::cube) {
+				throw std::runtime_error("Environment \"" + name + "\"'s radiance is not a cube.");
+			}
         }  else if (type == "LIGHT") {
-            // TODO: LIGHT struct
+            Light &light = s72.lights[name];
+
+			//check that we haven't already parsed this:
+			if (light.name != "") {
+				throw std::runtime_error("Multiple \"LIGHT\" objects with name \"" + name + "\".");
+			}
+
+			//mark as parsed:
+			light.name = name;
+
+            if (auto f = object.find("tint"); f != object.end()) {
+				try {
+					std::vector< sejp::value > const &vec = f->second.as_array().value();
+					light.tint = color{
+						.r = float(vec.at(0).as_number().value()),
+						.g = float(vec.at(1).as_number().value()),
+						.b = float(vec.at(2).as_number().value()),
+					};
+					if (vec.size() != 3) throw std::runtime_error("trailing values");
+				} catch (std::exception &) {
+					throw std::runtime_error("Light \"" + name + "\"'s tint was not an array of three numbers.");
+				}
+				object.erase(f);
+			}
+			if (object.contains("shadow")){
+				light.shadow = extract_uint32_t(&object, "shadow", "Light \"" + name + "\"'s shadow");
+			}
+
+            bool have_source = false;
+
+			if (auto f = object.find("sun"); f != object.end()) {
+				if (have_source) {
+					throw std::runtime_error("Light \"" + name + "\" has multiple sources.");
+				}
+				have_source = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = f->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Light \"" + name + "\"'s sun is not an object.");
+				}
+
+				Light::Sun sun;
+
+				sun.angle = extract_float(&obj, "angle", "Light \"" + name + "\"'s sun's angle");
+				sun.strength = extract_float(&obj, "strength", "Light \"" + name + "\"'s sun's strength");
+
+				light.source = sun;
+
+				warn_on_unhandled(obj, "Light \"" + name + "\"'s sun");
+				object.erase(f);
+			}
+			if (auto f = object.find("sphere"); f != object.end()) {
+				if (have_source) {
+					throw std::runtime_error("Light \"" + name + "\" has multiple sources.");
+				}
+				have_source = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = f->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Light \"" + name + "\"'s sphere is not an object.");
+				}
+
+				Light::Sphere sphere;
+
+				sphere.radius = extract_float(&obj, "radius", "Light \"" + name + "\"'s sphere's radius");
+				sphere.power = extract_float(&obj, "power", "Light \"" + name + "\"'s sphere's power");
+				if (obj.contains("limit")) {
+					sphere.limit = extract_float(&obj, "limit", "Light \"" + name + "\"'s sphere's limit");
+				}
+
+				light.source = sphere;
+
+				warn_on_unhandled(obj, "Light \"" + name + "\"'s sphere");
+				object.erase(f);
+			}
+			if (auto f = object.find("spot"); f != object.end()) {
+				if (have_source) {
+					throw std::runtime_error("Light \"" + name + "\" has multiple sources.");
+				}
+				have_source = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = f->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Light \"" + name + "\"'s spot is not an object.");
+				}
+
+				Light::Spot spot;
+
+				spot.radius = extract_float(&obj, "radius", "Light \"" + name + "\"'s spot's radius");
+				spot.power = extract_float(&obj, "power", "Light \"" + name + "\"'s spot's power");
+				if (obj.contains("limit")) {
+					spot.limit = extract_float(&obj, "limit", "Light \"" + name + "\"'s spot's limit");
+				}
+				spot.fov = extract_float(&obj, "fov", "Light \"" + name + "\"'s spot's fov");
+				spot.blend = extract_float(&obj, "blend", "Light \"" + name + "\"'s spot's blend");
+
+				light.source = spot;
+
+				warn_on_unhandled(obj, "Light \"" + name + "\"'s spot");
+				object.erase(f);
+			}
+
+			if (!have_source) {
+				throw std::runtime_error("Light \"" + name + "\" is missing a source.");
+			}
         } else {
-            std::runtime_error("Unknown object type"); // TODO: is this a good way to throw errors?
+            throw std::runtime_error("Unknown object type"); // std::runtime_error is appropriate for this case — it's the standard exception for errors detectable only at runtime
         }
     }
+
+    //-----------------------------------------------------------------------
+	//fix up paths for Datafiles and Textures to be relative to the s72 file
+
+	std::string scene_folder = "";
+	{ //extract prefix for relative paths:
+		auto pos = scene_file.find_last_of("\\/");
+		if (pos != std::string::npos) {
+			scene_folder = scene_file.substr(0 , pos+1);
+		}
+	}
+
+	//data files are just empty objects, but in a map with keys = src:
+	for (auto &[key, value] : s72.data_files) {
+		value.src = key;
+		value.path = scene_folder + value.src;
+	}
+
+	//textures are already populated with src, type, format; just need to set path:
+	for (auto &[key, value] : s72.textures) {
+		value.path = scene_folder + value.src;
+	}
+
+	return s72;
 }

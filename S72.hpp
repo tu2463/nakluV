@@ -109,9 +109,13 @@ struct S72 {
     };
     std::unordered_map< std::string, Mesh> meshes;
 
-    struct DataFile {
-        // TODO
-    };
+    //data files referenced by meshes:
+	struct DataFile {
+		std::string src; //src used in the s72 file
+
+		//computed during loading:
+		std::string path; //path to data file, taking into account path to s72 file (relative to current working directory)
+	};
     //we organize the data files by "src" so that multiple attributes with the same src resolve to the same DataFile:
 	std::unordered_map< std::string, DataFile > data_files;
 
@@ -182,7 +186,7 @@ struct S72 {
 			flat, //"2D" in the spec, but identifier can't start with a number
 			cube,
 		} type = Type::flat;
-		enum class Format { // TODO: understand these formats / colorspaces
+		enum class Format { // understand these formats / colorspaces //??
 			linear,
 			srgb,
 			rgbe,
