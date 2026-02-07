@@ -136,11 +136,63 @@ struct S72 {
             float far = std::numeric_limits< float >::infinity(); // far clipping plane distance, optional, if not specified will be set to infinity
         };
 		//(s72 leaves open the possibility of other camera projections, but does not define any)
-        std::variant< Perspective > perspective;
+        std::variant< Perspective > projection;
     };
     Camera cameras;
 
-    //TODO: Texture
+    /* zero or more "DRIVER"s, all with unique names:
+    {
+        "type":"DRIVER",
+        "name":"camera move",
+        "node":"camera transform",
+        "channel":"translation",
+        "times":[0, 1, 2, 3, 4],
+        "values":[0,0,0, 0,0,1, 0,1,1, 1,1,1, 0,0,0],
+        "interpolation":"LINEAR"
+    },
+    */ 
+    struct Driver {
+		std::string name;
+
+		Node &node;
+
+		enum class Channel {
+			translation,
+			scale,
+			rotation
+		} channel;
+
+		std::vector< float > times;
+		std::vector< float > values;
+
+		enum class Interpolation {
+			STEP,
+			LINEAR,
+			SLERP,
+		} interpolation = Interpolation::LINEAR;
+	};
+	//NOTE: drivers are stored in a vector in the order they appear in the file.
+	//      This is because drivers are applied in file order: //??
+    std::vector< Driver > drivers;
+
+    //textures are not objects from the scene, but referenced by materials:
+	struct Texture {
+		std::string src; //src used in the s72 file
+		enum class Type {
+			flat, //"2D" in the spec, but identifier can't start with a number
+			cube,
+		} type = Type::flat;
+		enum class Format { // TODO: understand these formats / colorspaces
+			linear,
+			srgb,
+			rgbe,
+		} format = Format::linear;
+
+		//computed during loading:
+		std::string path; //path to data file, taking into account path to s72 file (relative to current working directory)
+	};
+	//we organize textures by src + type + format, so that two materials using to the same image *in the same way* end up referring to the same texture object:
+    std::unordered_map< std::string, Texture > textures;
 
     /* zero or more "MATERIAL"s, all with unique names:
     {

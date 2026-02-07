@@ -37,7 +37,7 @@ VkPrimitiveTopology topology_to_VkPrimitiveTopology(std::string const &topology)
 
     auto f = map.find(topology);
     if (f == map.end()) throw new std::runtime_error("Unrecognized topology \"" + topology + "\".");
-    return f->second
+    return f->second;
 }
 
 //used for index formats:
@@ -133,6 +133,10 @@ void warn_on_unhandled(std::map< std::string, sejp::value > &object, std::string
 	std::cerr << '.' << std::endl;
 }
 
+// if (auto f = object.find(key); f != object.end()) is for optional fields
+// the extract_... functions are for required fields. they throw an error if the key doesn't exist, and they also delete the field from the object, so that we can check for unhandled fields at the end of parsing each object by seeing if any fields remain in the object after parsing
+// EXCEPTION: extract_map is for optional fields; it's like bundling the for loop and does more work. Also because we need to call extrac_map twice, so it's a clean refactor.
+
 //pull out a string property of a sejp object as a string.
     // throws if the property is missing
     // deletes property from the object and returns the value if all is well
@@ -170,6 +174,113 @@ uint32_t extract_uint32_t(std::map< std::string, sejp::value > *object_, std::st
 	object.erase(object.find(key));
 	return uint32_t(number);
 };
+
+//pull out a number property of a sejp object as a float.
+// throws if the property is missing
+// deletes property from the object and returns the value if all is well
+float extract_float(std::map< std::string, sejp::value > *object_, std::string const &key, std::string const &what) {
+	assert(object_);
+	auto &object = *object_;
+
+	double number;
+	try {
+		number = object.at(key).as_number().value();
+	} catch (std::exception &) {
+		throw std::runtime_error(what + " is not a number.");
+	}
+	object.erase(object.find(key));
+	return float(number);
+};
+
+//pull out an array property of a sejp object as a vector of float.
+// throws if the property is missing or contains non-number data
+// deletes property from the object and returns the value if all is well
+std::vector< float > extract_float_vector(std::map< std::string, sejp::value > *object_, std::string const &key, std::string const &what) {
+	assert(object_);
+	auto &object = *object_;
+
+	std::vector< float > ret;
+	try {
+		std::vector< sejp::value > const &array = object.at(key).as_array().value();
+		ret.reserve(array.size());
+		for (sejp::value const &value : array) {
+			ret.emplace_back(float(value.as_number().value()));
+		}
+	} catch (std::exception &) {
+		throw std::runtime_error(what + " is not an array of numbers.");
+	}
+	object.erase(object.find(key));
+	return ret;
+};
+
+//parse a texture map property of a sejp object into an S72's texture storage
+// throws if the property is missing or doesn't parse as a texture
+// deletes property from the object and returns a reference to the S72's textures container on success
+S72::Texture &extract_map(std::map< std::string, sejp::value > *object_, std::string const &key, S72 *s72_, std::string const &what) {
+	assert(object_);
+	auto &object = *object_;
+	assert(s72_);
+	auto &s72 = *s72_;
+
+	std::map< std::string, sejp::value > obj;
+	try {
+		obj = object.at(key).as_object().value();
+	} catch (std::exception &) {
+		throw std::runtime_error(what + " is not an object.");
+	}
+
+	std::string src = extract_string(&obj, "src", what + "'s src");
+	S72::Texture::Type type = S72::Texture::Type::flat;
+	if (obj.contains("type")) {
+		static std::map< std::string, S72::Texture::Type > string_to_type{
+			{"2D", S72::Texture::Type::flat},
+			{"cube", S72::Texture::Type::cube},
+		};
+
+		std::string str = extract_string(&obj, "type", what + "'s type");
+		try {
+			type = string_to_type.at(str);
+		} catch (std::exception &) {
+			throw std::runtime_error(what + "'s type \"" + str + "\" is not a recognized texture type.");
+		}
+	}
+
+	S72::Texture::Format format = S72::Texture::Format::linear;
+	if (obj.contains("format")) {
+		static std::map< std::string, S72::Texture::Format > string_to_format{
+			{"linear", S72::Texture::Format::linear},
+			{"srgb", S72::Texture::Format::srgb},
+			{"rgbe", S72::Texture::Format::rgbe},
+		};
+
+		std::string str = extract_string(&obj, "format", what + "'s format");
+		try {
+			format = string_to_format.at(str);
+		} catch (std::exception &) {
+			throw std::runtime_error(what + "'s format \"" + str + "\" is not a recognized texture format.");
+		}
+	}
+
+	warn_on_unhandled(obj, what);
+
+	object.erase(object.find(key));
+
+	std::string texture_key = src + ", format " + std::to_string(int(type)) + ", type " + std::to_string(int(format));
+
+    /*
+	std::pair<iterator, bool>                                                                                
+	//        ↑          ↑                                                                                   
+	//        │          └── true if inserted, false if key already existed                                  
+	//        └── iterator to the element (new or existing)                                                  
+	2. .first — get the iterator (first element of the pair)                                                 
+	3. ->second — iterator points to a pair<key, value>, so ->second gets the value (the Texture)
+
+	It does two things in one line:                                                                          
+	- Inserts the texture into s72.textures (so it's stored in the scene)                                    
+	- Returns a reference to it (so you can assign & to get a pointer)  
+	*/
+	return s72.textures.emplace(texture_key, S72::Texture{.src = src, .type = type, .format = format}).first->second;
+}
 
 S72 S72::load(std::string const &scene_file) {
     S72 s72; // the loaded scene, will be returned at end of function
@@ -437,11 +548,292 @@ S72 S72::load(std::string const &scene_file) {
 				mesh.material = &s72.materials[material];
 			}
         } else if (type == "CAMERA") {
-            // TODO: camera struct
+            Camera &camera = s72.cameras[name];
+
+			//check that we haven't already parsed this:
+			if (camera.name != "") {
+				throw std::runtime_error("Multiple \"CAMERA\" objects with name \"" + name + "\".");
+			}
+
+			//mark as parsed:
+			camera.name = name;
+
+            //(s72 leaves open the possibility of other camera projections, but does not define any) //??
+			bool have_projection = false;
+
+            if (!have_projection) {
+				throw std::runtime_error("Camera \"" + name + "\" does not have a projection.");
+			}
+
+            if (auto f = object.find("perspective"); f != object.end()) {
+				//make sure there aren't multiple projections on this camera:
+				if (have_projection) {
+					throw std::runtime_error("Camera \"" + name + "\" has multiple projections.");
+				}
+				have_projection = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = f->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Camera \"" + name + "\"'s projection is not an object.");
+				}
+
+				Camera::Perspective perspective;
+
+				perspective.aspect = extract_float(&obj, "aspect", "Camera \"" + name + "\"'s projection.aspect");
+				perspective.vfov = extract_float(&obj, "vfov", "Camera \"" + name + "\"'s projection.vfov");
+				perspective.near = extract_float(&obj, "near", "Camera \"" + name + "\"'s projection.near");
+				if (obj.contains("far")) {
+					perspective.far = extract_float(&obj, "far", "Camera \"" + name + "\"'s projection.far");
+				}
+
+				camera.projection = perspective;
+
+				warn_on_unhandled(obj, "Material \"" + name + "\"'s perspective");
+
+				object.erase(f);
+			}
         } else if (type == "DRIVER") {
-            // TODO: driver struct
+            //NOTE: not building into an existing object because we need to have a node reference ready when constructing.
+
+			std::string node = extract_string(&object, "node", "Driver \"" + name + "\"'s node");
+
+			Driver::Channel channel;
+			{ //get channel:
+				static std::map< std::string, Driver::Channel > string_to_channel{
+					{"translation", Driver::Channel::translation},
+					{"rotation", Driver::Channel::rotation},
+					{"scale", Driver::Channel::scale},
+				};
+
+				std::string str = extract_string(&object, "channel", "Driver \"" + name + "\"'s channel");
+				try {
+					channel = string_to_channel.at(str);
+				} catch (std::exception &) {
+					throw std::runtime_error("Driver \"" + name + "\"'s channel \"" + str + "\" is not a recognized channel name.");
+				}
+			}
+
+			std::vector< float > times = extract_float_vector(&object, "times", "Driver \"" + name + "\"'s times");
+			for (size_t t = 1; t < times.size(); ++t) {
+				if (times[t-1] > times[t]) {
+					throw std::runtime_error("Driver \"" + name + "\"'s times are not non-decreasing.");
+				}
+			}
+
+			std::vector< float > values = extract_float_vector(&object, "values", "Driver \"" + name + "\"'s values");
+
+			//check that times/values counts are consistent with channel type:
+			if (channel == Driver::Channel::translation || channel == Driver::Channel::scale) {
+				if (times.size() * 3 != values.size()) {
+					throw std::runtime_error("Driver \"" + name + "\" doesn't have times * 3 values.");
+				}
+			} else if (channel == Driver::Channel::rotation) {
+				if (times.size() * 4 != values.size()) {
+					throw std::runtime_error("Driver \"" + name + "\" doesn't have times * 4 values.");
+				}
+			} else {
+				assert(0 && "unreachable case"); // will print Assertion failed: 0 && "unreachable case"
+			}
+
+			Driver::Interpolation interpolation = Driver::Interpolation::LINEAR;
+			if(object.contains("interpolation")){
+				static std::map< std::string, Driver::Interpolation > string_to_interpolation{
+					{"STEP", Driver::Interpolation::STEP},
+					{"LINEAR", Driver::Interpolation::LINEAR},
+					{"SLERP", Driver::Interpolation::SLERP},
+				};
+
+				std::string str = extract_string(&object, "interpolation", "Driver \"" + name + "\"'s interpolation");
+				try {
+					interpolation = string_to_interpolation.at(str);
+				} catch (std::exception &) {
+					throw std::runtime_error("Driver \"" + name + "\"'s interpolation \"" + str + "\" is not a recognized interpolation name.");
+				}
+			}
+
+			s72.drivers.emplace_back(Driver{
+				.name = name,
+				.node = s72.nodes[node],
+				.channel = channel,
+				.times = std::move(times), // std::move() transfers ownership instead of copying, which is more efficient for large vectors; we won't be using the times/values vectors in the object after this, so it's safe to move them instead of copying
+				.values = std::move(values),
+				.interpolation = interpolation,
+			});
         }  else if (type == "MATERIAL") {
-            // TODO: MATERIAL struct
+            Material &material = s72.materials[name];
+
+			//check that we haven't already parsed this:
+			if (material.name != "") {
+				throw std::runtime_error("Multiple \"MATERIAL\" objects with name \"" + name + "\".");
+			}
+
+			//mark as parsed:
+			material.name = name;
+
+			if (object.contains("normalMap")) {
+				material.normal_map = &extract_map(&object, "normalMap", &s72, "Material \"" + name + "\"'s normalMap");
+			}
+			if (object.contains("displacementMap")) {
+				material.displacement_map = &extract_map(&object, "displacementMap", &s72, "Material \"" + name + "\"'s displacementMap");
+			}
+
+            bool have_brdf = false;
+
+			if (auto b = object.find("pbr"); b != object.end()) {
+				if (have_brdf) {
+					throw std::runtime_error("Material \"" + name + "\" has multiple brdfs.");
+				}
+				have_brdf = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = b->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Material \"" + name + "\"'s pbr is not an object.");
+				}
+
+				Material::PBR pbr;
+
+				if (auto f = obj.find("albedo"); f != obj.end()) {
+					if (std::optional< std::vector< sejp::value > > arr = f->second.as_array()) {
+						//3-vector of color
+						try {
+							std::vector< sejp::value > const &vec = arr.value();
+							pbr.albedo = color{
+								.r = float(vec.at(0).as_number().value()),
+								.g = float(vec.at(1).as_number().value()),
+								.b = float(vec.at(2).as_number().value()),
+							};
+							if (vec.size() != 3) throw std::runtime_error("trailing values");
+						} catch (std::exception &) {
+							throw std::runtime_error("Material \"" + name + "\"'s pbr.albedo was an array but it didn't hold exactly three numbers.");
+						}
+						obj.erase(f);
+					} else {
+						pbr.albedo = &extract_map(&obj, "albedo", &s72, "Material \"" + name + "\"'s pbr.albedo");
+					}
+				}
+
+				if (auto f = obj.find("roughness"); f != obj.end()) {
+					if (std::optional< double > number = f->second.as_number()) {
+						pbr.roughness = float(number.value());
+						obj.erase(f);
+					} else {
+						pbr.roughness = &extract_map(&obj, "roughness", &s72, "Material \"" + name + "\"'s pbr.roughness");
+					}
+				}
+
+				if (auto f = obj.find("metalness"); f != obj.end()) {
+					if (std::optional< double > number = f->second.as_number()) {
+						pbr.metalness = float(number.value());
+						obj.erase(f);
+					} else {
+						pbr.metalness = &extract_map(&obj, "metalness", &s72, "Material \"" + name + "\"'s pbr.metalness");
+					}
+				}
+
+				material.brdf = pbr;
+
+				warn_on_unhandled(obj, "Material \"" + name + "\"'s pbr");
+
+				object.erase(b);
+			}
+
+			if (auto b = object.find("lambertian"); b != object.end()) {
+				if (have_brdf) {
+					throw std::runtime_error("Material \"" + name + "\" has multiple brdfs.");
+				}
+				have_brdf = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = b->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Material \"" + name + "\"'s lambertian is not an object.");
+				}
+
+				Material::Lambertian lambertian;
+
+				if (auto f = obj.find("albedo"); f != obj.end()) {
+					if (std::optional< std::vector< sejp::value > > arr = f->second.as_array()) {
+						//3-vector of color
+						try {
+							std::vector< sejp::value > const &vec = arr.value();
+							lambertian.albedo = color{
+								.r = float(vec.at(0).as_number().value()),
+								.g = float(vec.at(1).as_number().value()),
+								.b = float(vec.at(2).as_number().value()),
+							};
+							if (vec.size() != 3) throw std::runtime_error("trailing values");
+						} catch (std::exception &) {
+							throw std::runtime_error("Material \"" + name + "\"'s lambertian.albedo was an array but it didn't hold exactly three numbers.");
+						}
+						obj.erase(f);
+					} else {
+						lambertian.albedo = &extract_map(&obj, "albedo", &s72, "Material \"" + name + "\"'s lambertian.albedo");
+					}
+				}
+
+				material.brdf = lambertian;
+
+				warn_on_unhandled(obj, "Material \"" + name + "\"'s lambertian");
+
+				object.erase(b);
+			}
+
+			if (auto b = object.find("mirror"); b != object.end()) {
+				if (have_brdf) {
+					throw std::runtime_error("Material \"" + name + "\" has multiple brdfs.");
+				}
+				have_brdf = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = b->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Material \"" + name + "\"'s mirror is not an object.");
+				}
+
+				Material::Mirror mirror;
+
+				//no properties!
+
+				material.brdf = mirror;
+
+				warn_on_unhandled(obj, "Material \"" + name + "\"'s mirror");
+
+				object.erase(b);
+			}
+
+			if (auto b = object.find("environment"); b != object.end()) {
+				if (have_brdf) {
+					throw std::runtime_error("Material \"" + name + "\" has multiple brdfs.");
+				}
+				have_brdf = true;
+
+				std::map< std::string, sejp::value > obj;
+				try {
+					obj = b->second.as_object().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Material \"" + name + "\"'s environment is not an object.");
+				}
+
+				Material::Environment environment;
+
+				//no properties!
+
+				material.brdf = environment;
+
+				warn_on_unhandled(obj, "Material \"" + name + "\"'s environment");
+
+				object.erase(b);
+			}
+
+			if (!have_brdf) {
+				throw std::runtime_error("Material \"" + name + "\" does not have a brdf.");
+			}
         }  else if (type == "ENVIRONMENT") {
             // TODO: ENVIRONMENT struct
         }  else if (type == "LIGHT") {
