@@ -11,6 +11,7 @@ struct S72 {
     // we use this for easy substitution (in the future, can easily switch to e.g. using vec2 = glm::vec3)
 	using vec3 = struct vec3_internal{ float x, y, z; };
 	using quat = struct quat_internal{ float x, y, z, w; };
+	using color = struct color_internal{ float r, g, b; };
 
     static S72 load(std::string const &file);
 
@@ -109,7 +110,7 @@ struct S72 {
     std::unordered_map< std::string, Mesh> meshes;
 
     struct DataFile {
-
+        // TODO
     };
     //we organize the data files by "src" so that multiple attributes with the same src resolve to the same DataFile:
 	std::unordered_map< std::string, DataFile > data_files;
@@ -139,6 +140,62 @@ struct S72 {
     };
     Camera cameras;
 
+    //TODO: Texture
+
+    /* zero or more "MATERIAL"s, all with unique names:
+    {
+        "type":"MATERIAL",
+        "name":"boring blue",
+        "normalMap":{ "src":"normal.png" },
+        "displacementMap":{ "src":"displacement.png" },
+        "pbr":{
+            "albedo": [0.5, 0.5, 0.85],
+            /* xor 
+            "albedo": { "src":"blue.png" },
+
+            "roughness": 0.5,
+            /* xor 
+            "roughness": { "src":"roughness-map.png" },
+
+            "metalness": 0.0,
+            /* xor 
+            "metalness": { "src":"metalness-map.png" }
+        },
+        /* xor 
+        "lambertian": {
+            "albedo": [0.5, 0.5, 0.85],
+            /* xor 
+            "albedo": { "src":"blue.png" }
+        },
+        /* xor 
+        "mirror": { /* no parameters  },
+        /* xor 
+        "environment": { /* no parameters  },
+    },
+    */
+    struct Material {
+		std::string name;
+
+		Texture *normal_map = nullptr; //optional, set to null if not specified
+		Texture *displacement_map = nullptr; //optional, set to null if not specified
+
+		//Materials are one of these types:
+		// NOTE: if any of these parameters are the Texture * branch of their variant, they are not null
+		struct PBR {
+			std::variant< color, Texture * > albedo = color{.r = 1.0f, .g = 1.0f, .b = 1.0f};
+			std::variant< float, Texture * > roughness = 1.0f;
+			std::variant< float, Texture * > metalness = 0.0f;
+		};
+		struct Lambertian {
+			std::variant< color, Texture * > albedo = color{.r = 1.0f, .g = 1.0f, .b = 1.0f};
+		};
+		struct Mirror { /* no parameters */ };
+		struct Environment { /* no parameters */ };
+
+		std::variant< PBR, Lambertian, Mirror, Environment > brdf;
+	};
+    std::unordered_map< std::string, Material > materials;
+
     /* 
     {
         "type":"ENVIRONMENT",
@@ -147,12 +204,62 @@ struct S72 {
     },
     */
     struct Environment{
-
+        std::string name;
+        Texture *radiance;
     };
-    Environment environments;
+    std::unordered_map< std::string, Environment> environments;
 
-    struct Light{
+    /* zero or more "LIGHT"s, all with unique names:
+    {
+        "type":"LIGHT",
+        "name":"yellow-sun",
+        "tint":[1.0, 1.0, 0.9],
+        "sun":{
+            "angle":0.00918,
+            "strength":10.0
+        },
+        // xor
+        "sphere":{
+            "radius":0.1,
+            "power":60.0,
+            "limit":4.0
+        },
+        // xor
+        "spot":{
+            "radius":0.5,
+            "power":60.0,
+            "fov":0.785,
+            "blend":0.15,
+            "limit":11.0
+        },
+        "shadow":256
+    },
+    */
+    struct Light {
+		std::string name;
 
-    };
-    Light lights;
+		color tint = color{ .r = 1.0f, .g = 1.0f, .b = 1.0f };
+
+		uint32_t shadow = 0; //optional, if not set will be '0'
+
+		//light has exactly one of these sources:
+		struct Sun {
+			float angle;
+			float strength;
+		};
+		struct Sphere {
+			float radius;
+			float power;
+			float limit = std::numeric_limits< float >::infinity(); //optional, will be infinity if not specified
+		};
+		struct Spot {
+			float radius;
+			float power;
+			float limit = std::numeric_limits< float >::infinity(); //optional, will be infinity if not specified
+			float fov;
+			float blend;
+		};
+		std::variant< Sun, Sphere, Spot > source;
+	};
+    std::unordered_map< std::string, Light> lights;
 };
