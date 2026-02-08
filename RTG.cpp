@@ -55,6 +55,13 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			scene_file = argv[argi];
 		} else if (arg == "--print") {
 			print_s72 = true;
+		} else if (arg == "--camera") {
+			if (argi + 1 >= argc) throw std::runtime_error("--camera requires a parameter (a camera name).");
+			argi += 1;
+			camera_mode = argv[argi];
+			if (camera_mode != "scene" && camera_mode != "user" && camera_mode != "debug") {
+				throw std::runtime_error("--camera must be 'user', 'scene', or 'debug'.");
+			}
 		} else {
 			throw std::runtime_error("Unrecognized argument '" + arg + "'.");
 		}

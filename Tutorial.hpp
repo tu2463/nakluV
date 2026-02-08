@@ -169,14 +169,15 @@ struct Tutorial : RTG::Application {
 
 	//modal action, intercepts inputs:
 	std::function< void(InputEvent const &) > action;
-	
+
 	float time = 0.0f;
 
 	//for selecting between cameras:
 	enum class CameraMode {
 		Scene = 0,
-		Free = 1,
-	} camera_mode = CameraMode::Free;
+		User = 1, // previously "Free" in tutorial
+		Debug = 2,
+	} camera_mode = CameraMode::User;
 
 	struct OrbitCamera {
 		float target_x = 0.0f, target_y = 0.0f, target_z = 0.0f; //where the camera is looking + orbiting

@@ -22,6 +22,18 @@ struct Vec3 {
 Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	// refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
 
+	{ // set camera mode based on input
+		if (rtg.configuration.camera_mode == "scene") {
+			camera_mode = CameraMode::Scene;
+		} else if (rtg.configuration.camera_mode == "user") {
+			camera_mode = CameraMode::User;
+		} else if (rtg.configuration.camera_mode == "debug") {
+			camera_mode = CameraMode::Debug;
+		} else {
+			throw std::runtime_error("Invalid camera mode '" + rtg.configuration.camera_mode + "'. Must be 'scene', 'user', or 'debug'.");
+		}
+	}
+
 	// select a depth format:
 	// at least one of these two must be supported, according to the spec; but neither are required
 	depth_format = rtg.helpers.find_image_format(
@@ -1060,7 +1072,7 @@ void Tutorial::update(float dt) {
 			0.0f, 0.0f, 0.5f, //target
 			0.0f, 0.0f, 1.0f //up
 		);
-	} else if (camera_mode == CameraMode::Free) { // understand this //??
+	} else if (camera_mode == CameraMode::User) { // understand this //??
 		CLIP_FROM_WORLD = perspective(
 			free_camera.fov,
 			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
@@ -1070,6 +1082,8 @@ void Tutorial::update(float dt) {
 			free_camera.target_x, free_camera.target_y, free_camera.target_z,
 			free_camera.azimuth, free_camera.elevation, free_camera.radius
 		);
+	} else if (camera_mode == CameraMode::Debug) {
+		// TODO: the rendering happens through a second user-controlled camera, but the culling happens for the previously-active camera (this is very useful for debugging culling). When using the debug  camera, your renderer should display object bounding boxes and camera frustums using lines.
 	} else {
 		assert(0 && "only two camera modes");
 	}
@@ -1330,12 +1344,12 @@ void Tutorial::on_input(InputEvent const &evt) { // review/understand this //??
 	// general controls:
 	if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_TAB) { // tab key
 		// switch cameras modes
-		camera_mode = CameraMode((int(camera_mode) + 1) % 2);
+		camera_mode = CameraMode((int(camera_mode) + 1) % 3); // 3 camera modes: Scene, User, Debug
 		return; // returns since we don't want any later event handling code to be allowed to respond to the tab key
 	}
 
 	// free camera controls:
-	if (camera_mode == CameraMode::Free) {
+	if (camera_mode == CameraMode::User) {
 		if (evt.type == InputEvent::MouseWheel) {
 			// change distance by 10% every scroll click:
 			free_camera.radius *= std::exp(std::log(1.1f) * -evt.wheel.y);

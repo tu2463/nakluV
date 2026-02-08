@@ -85,6 +85,9 @@ struct RTG {
 		// A1-load: S72 loader
 		std::string scene_file = "";
 		bool print_s72 = false;
+
+		// A1-show: camera model
+		std::string camera_mode = "user"; // scene/user/debug
 	};
 
 	Configuration configuration; //configuration, as used (might have extra extensions, layers, or flags added)
