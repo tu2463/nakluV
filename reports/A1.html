@@ -48,6 +48,10 @@ p {
 	font-style:italic;
 }
 
+.answer {
+	color:#373737;
+}
+
 kbd {
 	display:inline-block;
 	background:#ccc;
@@ -174,6 +178,18 @@ These thoughts may also help you improve the code as you work on it in A2 and be
 <p class="placeholder">
 Describe, in a few sentences, how your loading code works.
 Reference function and structure names for us to examine.
+</p>
+
+<p class="answer">
+The S72::load() function is adapted from the example code. It uses the sejp library to parse the .s72 JSON file into an intermediate S72 struct, which is also adapted from the example code. It iterates through the array converted from JSON, parse each object based on the "type" field and save them into corresponding data structures in the S72 struct. After parsing, binary mesh data files (.b72) referenced by meshes are read and loaded into DataFile::data vectors.
+</p>
+
+<p class="answer">
+The S72::process_meshes() function then iterates over all meshes, extracting vertex attributes from the raw binary data saved in DataFile using their offset/stride information, and pools them into a std::vector<PosNorTexTanVertex> as part of the S72 struct. Each mesh records its first_vertex index into this pooled buffer, which is similar to how ObjectVertices stores the first vertex for each object.
+</p>
+
+<p class="answer">
+Finally, in main.cpp, the pooled vertices are uploaded to a device-local Vulkan buffer (s72_vertices) for later GPU rendering, similar to how object_vertices was created.
 </p>
 
 <p class="placeholder">
