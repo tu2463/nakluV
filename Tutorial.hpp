@@ -83,7 +83,7 @@ struct Tutorial : RTG::Application {
 
 		struct Transform {
 			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space, for gl_Position
-			mat4 WORLD_FROM_LOCAL; // from local positions to world space, for positions (lighting calculations)
+			mat4 WORLD_FROM_LOCAL; // from local positions to world space, for positions (lighting calculations); Where the object IS in the world (position + orientation)
 			mat4 WORLD_FROM_LOCAL_NORMAL; // for normals = transpose(inverse(WORLD_FROM_LOCAL))
 		};
 		static_assert(sizeof(Transform) == 16*4 + 16*4 + 16*4, "Transform is the expected size.");
@@ -175,9 +175,16 @@ struct Tutorial : RTG::Application {
 	//for selecting between cameras:
 	enum class CameraMode {
 		Scene = 0,
-		User = 1, // previously "Free" in tutorial
+		User = 1, // previously called "Free" in tutorial
 		Debug = 2,
 	} camera_mode = CameraMode::User;
+
+	struct CameraInstance {
+		S72::Camera *camera; // reference to the camera data for this object, which includes projection (vfov, aspect, near, far)   
+		mat4 WORLD_FROM_LOCAL; // is this optional //?? for scene camera's world position/orientation 
+	};
+	std::vector< CameraInstance > scene_camera_instances;
+	uint8_t active_scene_camera = 0; // index into scene_camera_instances of the currently active camera, used when camera_mode == CameraMode::Scene
 
 	struct OrbitCamera {
 		float target_x = 0.0f, target_y = 0.0f, target_z = 0.0f; //where the camera is looking + orbiting

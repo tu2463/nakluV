@@ -740,8 +740,13 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	}
 
 	{ // upload camera info:
+		// CameraInstance = storage format kept in CPU; LinesPipeline::Camera = the GPU/shader format that gets uploaded
+		// because The shader is written to read CLIP_FROM_WORLD at offset 0 //TODO: do we need the shader to read more?
 		LinesPipeline::Camera camera{
 			.CLIP_FROM_WORLD = CLIP_FROM_WORLD};
+
+		// //TODO: later add conditions to check camera mode
+		// CameraInstance camera = scene_camera_instances[active_scene_camera]; // TODO: check if this is correct. should use the current active scene camera
 		assert(workspace.Camera_src.size == sizeof(camera));
 
 		// host-side copy into Camera_src:
@@ -1060,122 +1065,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
 
-	if (camera_mode == CameraMode::Scene) { // camera rotating the origin:
-		float ang = float(M_PI) * 2.0f * 10.0f * (time / 60.0f);
-		CLIP_FROM_WORLD = perspective( // understand this //??
-			60.0f * float(M_PI) / 180.0f, //vfov
-			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
-			0.1f, //near
-			1000.0f //far
-		) * look_at(
-			3.0f * std::cos(ang), 3.0f * std::sin(ang), 1.0f, //eye
-			0.0f, 0.0f, 0.5f, //target
-			0.0f, 0.0f, 1.0f //up
-		);
-	} else if (camera_mode == CameraMode::User) { // understand this //??
-		CLIP_FROM_WORLD = perspective(
-			free_camera.fov,
-			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
-			free_camera.near,
-			free_camera.far
-		) * orbit(
-			free_camera.target_x, free_camera.target_y, free_camera.target_z,
-			free_camera.azimuth, free_camera.elevation, free_camera.radius
-		);
-	} else if (camera_mode == CameraMode::Debug) {
-		// TODO: the rendering happens through a second user-controlled camera, but the culling happens for the previously-active camera (this is very useful for debugging culling). When using the debug  camera, your renderer should display object bounding boxes and camera frustums using lines.
-	} else {
-		assert(0 && "only two camera modes");
-	}
-
-	{ // static sun and sky
-		// Direction: (0, 0, 1) — pointing straight up along the Z-axis 
-		world.SKY_DIRECTION.x = 0.0f;
-		world.SKY_DIRECTION.y = 0.0f;
-		world.SKY_DIRECTION.z = 1.0f;
-
-		// Energy: (0.1, 0.1, 0.2) — a dim, slightly blue tint (the blue channel is twice as strong as red/green)    
-		world.SKY_ENERGY.r = 0.1f;
-		world.SKY_ENERGY.g = 0.1f;
-		world.SKY_ENERGY.b = 0.2f;
-
-		// Direction: (6/23, 13/23, 18/23) ≈ (0.26, 0.57, 0.78) — a normalized vector pointing roughly up and to the side
-		world.SUN_DIRECTION.x = 6.0f / 23.0f;
-		world.SUN_DIRECTION.y = 13.0f / 23.0f;
-		world.SUN_DIRECTION.z = 18.0f / 23.0f;
-
-		// Energy: (1.0, 1.0, 0.9) — bright white with a slight warm/yellow tint (red and green at full, blue slightly reduced)  
-		world.SUN_ENERGY.r = 1.0f;
-		world.SUN_ENERGY.g = 1.0f;
-		world.SUN_ENERGY.b = 0.9f;
-	}
-
-	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
-		lines_vertices.clear();
-
-		constexpr uint32_t pyramids = 4;
-		constexpr size_t edges_per_pyramid = 6;
-		constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
-		lines_vertices.reserve(count);
-
-		auto vadd = [](Vec3 a, Vec3 b) -> Vec3 { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
-		auto vscale = [](Vec3 a, float s) -> Vec3 { return Vec3{a.x * s, a.y * s, a.z * s}; };
-
-		auto push_edge = [&](Vec3 a, Vec3 b,
-							uint8_t ar, uint8_t ag, uint8_t ab, uint8_t aa,
-							uint8_t br, uint8_t bg, uint8_t bb, uint8_t ba) {
-			lines_vertices.emplace_back(PosColVertex{
-				.Position{ .x = a.x, .y = a.y, .z = a.z },
-				.Color{ .r = ar, .g = ag, .b = ab, .a = aa },
-			});
-			lines_vertices.emplace_back(PosColVertex{
-				.Position{ .x = b.x, .y = b.y, .z = b.z },
-				.Color{ .r = br, .g = bg, .b = bb, .a = ba },
-			});
-		};
-
-		auto push_tetra = [&](Vec3 center, float s,
-							// color per vertex (apex, base1, base2, base3)
-							uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
-							uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
-							uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
-							uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
-
-			// Local tetra vertices (triangular pyramid), then translate by center:
-			Vec3 A = vadd(center, vscale(Vec3{ 0.0f,  0.75f,  0.0f}, s)); // apex
-			Vec3 B = vadd(center, vscale(Vec3{-0.65f, -0.375f, -0.45f}, s)); // base v1
-			Vec3 C = vadd(center, vscale(Vec3{ 0.65f, -0.375f, -0.45f}, s)); // base v2
-			Vec3 D = vadd(center, vscale(Vec3{ 0.0f, -0.375f,  0.75f}, s)); // base v3
-
-			// 6 edges:
-			push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
-			push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
-			push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
-
-			push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
-			push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
-			push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
-		};
-
-		const float s = 0.35f; // pyramid size
-
-		// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
-		push_tetra(Vec3{-0.45f,  0.35f, 0.25f}, s,
-				0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
-
-		push_tetra(Vec3{ 0.45f,  0.35f, 0.55f}, s,
-				0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
-
-		push_tetra(Vec3{-0.45f, -0.35f, 0.45f}, s,
-				0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
-
-		push_tetra(Vec3{ 0.45f, -0.35f, 0.15f}, s,
-				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
-
-		assert(lines_vertices.size() == count);
-	}
-
 	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus //TODO: understand this)
+		// TODO: can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
 		object_instances.clear();
 
 		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
@@ -1183,7 +1074,7 @@ void Tutorial::update(float dt) {
 		// 2. Building Local Transform from node's TRS (Translation, Rotation Scale: local = Translation × Rotation × Scale      
 		// Where: Translation = mat4 with (tx, ty, tz) in last column; Rotation = quaternion (x,y,z,w) → 3x3 rotation matrix; Scale = diagonal mat4 with (sx, sy, sz, 1)  
 
-		//TODO: understand these helpers
+		// understand these helpers //??
 		// helper: make translation matrix from S72::vec3
 		auto translate = [](S72::vec3 const &t) -> mat4 {
 			return mat4{
@@ -1302,6 +1193,13 @@ void Tutorial::update(float dt) {
 				});
 			}
 
+			if (node->camera != nullptr) {
+				scene_camera_instances.emplace_back(CameraInstance{
+					.camera = node->camera,
+					.WORLD_FROM_LOCAL = world,
+				});
+			}
+
 			for (S72::Node* child : node->children) {
 				traverse(child, world);
 			}
@@ -1331,6 +1229,126 @@ void Tutorial::update(float dt) {
 		// 	});
 		// }
 	}
+
+	if (camera_mode == CameraMode::Scene) {
+		//TODO: what do we need here? the rendering happens through one of the cameras in the scene graph and the user cannot change the camera transformation
+		if (scene_camera_instances.empty()) {
+			camera_mode = CameraMode::User; // switch to user camera if no cameras in scene
+		} else {
+			CameraInstance const &camera = scene_camera_instances[active_scene_camera];
+			S72::Camera::Perspective& projection = std::get<S72::Camera::Perspective>(camera.camera->projection); //vv need to use this instead of camera.camera->projection; because the original type is a variant
+			mat4 perpective_projection_matrix = perspective(
+				projection.vfov,
+				projection.aspect,
+				projection.near,
+				projection.far
+			);
+			// View = inverse of camera's world transform //??
+			mat4 view = inverse(camera.WORLD_FROM_LOCAL);
+			CLIP_FROM_WORLD = perpective_projection_matrix * view; //??
+		}
+	} else if (camera_mode == CameraMode::User) { // understand this //??
+		CLIP_FROM_WORLD = perspective(
+			free_camera.fov,
+			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
+			free_camera.near,
+			free_camera.far
+		) * orbit(
+			free_camera.target_x, free_camera.target_y, free_camera.target_z,
+			free_camera.azimuth, free_camera.elevation, free_camera.radius
+		);
+	} else if (camera_mode == CameraMode::Debug) {
+		// TODO: the rendering happens through a second user-controlled camera, but the culling happens for the previously-active camera (this is very useful for debugging culling). When using the debug  camera, your renderer should display object bounding boxes and camera frustums using lines.
+	} else {
+		assert(0 && "only two camera modes");
+	}
+
+	{ // static sun and sky
+		// Direction: (0, 0, 1) — pointing straight up along the Z-axis 
+		world.SKY_DIRECTION.x = 0.0f;
+		world.SKY_DIRECTION.y = 0.0f;
+		world.SKY_DIRECTION.z = 1.0f;
+
+		// Energy: (0.1, 0.1, 0.2) — a dim, slightly blue tint (the blue channel is twice as strong as red/green)    
+		world.SKY_ENERGY.r = 0.1f;
+		world.SKY_ENERGY.g = 0.1f;
+		world.SKY_ENERGY.b = 0.2f;
+
+		// Direction: (6/23, 13/23, 18/23) ≈ (0.26, 0.57, 0.78) — a normalized vector pointing roughly up and to the side
+		world.SUN_DIRECTION.x = 6.0f / 23.0f;
+		world.SUN_DIRECTION.y = 13.0f / 23.0f;
+		world.SUN_DIRECTION.z = 18.0f / 23.0f;
+
+		// Energy: (1.0, 1.0, 0.9) — bright white with a slight warm/yellow tint (red and green at full, blue slightly reduced)  
+		world.SUN_ENERGY.r = 1.0f;
+		world.SUN_ENERGY.g = 1.0f;
+		world.SUN_ENERGY.b = 0.9f;
+	}
+
+	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
+		lines_vertices.clear();
+
+		constexpr uint32_t pyramids = 4;
+		constexpr size_t edges_per_pyramid = 6;
+		constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
+		lines_vertices.reserve(count);
+
+		auto vadd = [](Vec3 a, Vec3 b) -> Vec3 { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; };
+		auto vscale = [](Vec3 a, float s) -> Vec3 { return Vec3{a.x * s, a.y * s, a.z * s}; };
+
+		auto push_edge = [&](Vec3 a, Vec3 b,
+							uint8_t ar, uint8_t ag, uint8_t ab, uint8_t aa,
+							uint8_t br, uint8_t bg, uint8_t bb, uint8_t ba) {
+			lines_vertices.emplace_back(PosColVertex{
+				.Position{ .x = a.x, .y = a.y, .z = a.z },
+				.Color{ .r = ar, .g = ag, .b = ab, .a = aa },
+			});
+			lines_vertices.emplace_back(PosColVertex{
+				.Position{ .x = b.x, .y = b.y, .z = b.z },
+				.Color{ .r = br, .g = bg, .b = bb, .a = ba },
+			});
+		};
+
+		auto push_tetra = [&](Vec3 center, float s,
+							// color per vertex (apex, base1, base2, base3)
+							uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
+							uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
+							uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
+							uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
+
+			// Local tetra vertices (triangular pyramid), then translate by center:
+			Vec3 A = vadd(center, vscale(Vec3{ 0.0f,  0.75f,  0.0f}, s)); // apex
+			Vec3 B = vadd(center, vscale(Vec3{-0.65f, -0.375f, -0.45f}, s)); // base v1
+			Vec3 C = vadd(center, vscale(Vec3{ 0.65f, -0.375f, -0.45f}, s)); // base v2
+			Vec3 D = vadd(center, vscale(Vec3{ 0.0f, -0.375f,  0.75f}, s)); // base v3
+
+			// 6 edges:
+			push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
+			push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
+			push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
+
+			push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
+			push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
+			push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
+		};
+
+		const float s = 0.35f; // pyramid size
+
+		// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
+		push_tetra(Vec3{-0.45f,  0.35f, 0.25f}, s,
+				0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
+
+		push_tetra(Vec3{ 0.45f,  0.35f, 0.55f}, s,
+				0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
+
+		push_tetra(Vec3{-0.45f, -0.35f, 0.45f}, s,
+				0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
+
+		push_tetra(Vec3{ 0.45f, -0.35f, 0.15f}, s,
+				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
+
+		assert(lines_vertices.size() == count);
+	}
 }
 
 
@@ -1345,10 +1363,23 @@ void Tutorial::on_input(InputEvent const &evt) { // review/understand this //??
 	if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_TAB) { // tab key
 		// switch cameras modes
 		camera_mode = CameraMode((int(camera_mode) + 1) % 3); // 3 camera modes: Scene, User, Debug
+		std::cout << "Camera mode: " << (camera_mode == CameraMode::Scene ? "Scene" : camera_mode == CameraMode::User ? "User" : "Debug") << std::endl;
+		if (camera_mode == CameraMode::Scene && !scene_camera_instances.empty()) {
+			std::cout << "Active scene camera: " << scene_camera_instances[active_scene_camera].camera->name << std::endl;
+		}
 		return; // returns since we don't want any later event handling code to be allowed to respond to the tab key
 	}
 
-	// free camera controls:
+	// scene camera controls:
+	if (camera_mode == CameraMode::Scene) {
+		if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_SPACE) {
+			active_scene_camera = (int(active_scene_camera) + 1) % scene_camera_instances.size(); // change between scene cameras
+			std::cout << "Active scene camera: " << scene_camera_instances[active_scene_camera].camera->name << std::endl;
+			return;
+		}
+	}
+
+	// user (previously called "free") camera controls:
 	if (camera_mode == CameraMode::User) {
 		if (evt.type == InputEvent::MouseWheel) {
 			// change distance by 10% every scroll click:

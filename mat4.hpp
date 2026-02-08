@@ -169,6 +169,63 @@ inline mat4 orbit(
 	};
 }
 
+// 4x4 matrix inverse using cofactor expansion
+// Returns the inverse of M. Assumes M is invertible (non-zero determinant).
+inline mat4 inverse(mat4 const &M) {
+    // For column-major storage: M[c*4 + r] is element at row r, column c
+    // Using shorthand: m[row][col] where m00 = M[0], m10 = M[1], m01 = M[4], etc.
+
+    float m00 = M[0],  m10 = M[1],  m20 = M[2],  m30 = M[3];
+    float m01 = M[4],  m11 = M[5],  m21 = M[6],  m31 = M[7];
+    float m02 = M[8],  m12 = M[9],  m22 = M[10], m32 = M[11];
+    float m03 = M[12], m13 = M[13], m23 = M[14], m33 = M[15];
+
+    // Compute 2x2 determinants (minors) for the bottom two rows
+    float s0 = m00 * m11 - m10 * m01;
+    float s1 = m00 * m12 - m10 * m02;
+    float s2 = m00 * m13 - m10 * m03;
+    float s3 = m01 * m12 - m11 * m02;
+    float s4 = m01 * m13 - m11 * m03;
+    float s5 = m02 * m13 - m12 * m03;
+
+    float c5 = m22 * m33 - m32 * m23;
+    float c4 = m21 * m33 - m31 * m23;
+    float c3 = m21 * m32 - m31 * m22;
+    float c2 = m20 * m33 - m30 * m23;
+    float c1 = m20 * m32 - m30 * m22;
+    float c0 = m20 * m31 - m30 * m21;
+
+    // Compute determinant
+    float det = s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0;
+
+    // Compute inverse determinant
+    float invdet = 1.0f / det;
+
+    // Compute adjugate matrix divided by determinant
+    mat4 R;
+    R[0]  = ( m11 * c5 - m12 * c4 + m13 * c3) * invdet;
+    R[1]  = (-m10 * c5 + m12 * c2 - m13 * c1) * invdet;
+    R[2]  = ( m10 * c4 - m11 * c2 + m13 * c0) * invdet;
+    R[3]  = (-m10 * c3 + m11 * c1 - m12 * c0) * invdet;
+
+    R[4]  = (-m01 * c5 + m02 * c4 - m03 * c3) * invdet;
+    R[5]  = ( m00 * c5 - m02 * c2 + m03 * c1) * invdet;
+    R[6]  = (-m00 * c4 + m01 * c2 - m03 * c0) * invdet;
+    R[7]  = ( m00 * c3 - m01 * c1 + m02 * c0) * invdet;
+
+    R[8]  = ( m31 * s5 - m32 * s4 + m33 * s3) * invdet;
+    R[9]  = (-m30 * s5 + m32 * s2 - m33 * s1) * invdet;
+    R[10] = ( m30 * s4 - m31 * s2 + m33 * s0) * invdet;
+    R[11] = (-m30 * s3 + m31 * s1 - m32 * s0) * invdet;
+
+    R[12] = (-m21 * s5 + m22 * s4 - m23 * s3) * invdet;
+    R[13] = ( m20 * s5 - m22 * s2 + m23 * s1) * invdet;
+    R[14] = (-m20 * s4 + m21 * s2 - m23 * s0) * invdet;
+    R[15] = ( m20 * s3 - m21 * s1 + m22 * s0) * invdet;
+
+    return R;
+}
+
 constexpr mat4 mat4_identity{                                                                                                                                                                                            
     1.0f, 0.0f, 0.0f, 0.0f,                                                                                                                                                                                              
     0.0f, 1.0f, 0.0f, 0.0f,                                                                                                                                                                                              
