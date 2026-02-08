@@ -130,9 +130,10 @@ int main(int argc, char **argv) {
 		S72 s72;
 		try {
 			s72 = S72::load(configuration.scene_file);
+			s72.process_meshes(); // extract vertices from binary data
 		} catch (std::exception &e) {
-			// - e — the caught exception object                                        
-			// - .what() — returns a const char* (C-string) containing the message passed when the exception was thrown  
+			// - e — the caught exception object
+			// - .what() — returns a const char* (C-string) containing the message passed when the exception was thrown
 			std::cerr <<  "Failed to load s72-format scene from '" << configuration.scene_file << e.what() << std::endl;
 			return 1;
 		}

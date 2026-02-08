@@ -2,6 +2,7 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include "PosNorTexTanVertex.hpp"
 
 //functions that do the inverse of those in vk_enum_string_helper.h :
 
@@ -1015,5 +1016,42 @@ S72 S72::load(std::string const &scene_file) {
         std::cout << "Loaded data file: " << data_file.path << " (" << size << " bytes)" << std::endl;
     }
 
-	return s72;
+	return s72; // the loaded scene
+}
+
+// Helper to read floats from a byte pointer
+inline float read_float(uint8_t const *ptr) {
+    return *reinterpret_cast<float const*>(ptr);
+}
+
+void S72::process_meshes() {
+    for (auto &[mesh_name, mesh] : meshes) {
+        // Record where this mesh starts in the pooled vertex buffer
+        mesh.first_vertex = static_cast<uint32_t>(vertices.size());
+
+        for (uint32_t i = 0; i < mesh.count; ++i) {
+            PosNorTexTanVertex vertex{};
+
+            for (auto const &[attr_name, attr] : mesh.attributes) {
+                uint8_t const *ptr = attr.src.data.data() + attr.offset + i * attr.stride;
+
+                if (attr_name == "POSITION") {
+                    vertex.Position = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
+                } else if (attr_name == "NORMAL") {
+                    vertex.Normal = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
+                } else if (attr_name == "TEXCOORD") {
+                    vertex.TexCoord = {read_float(ptr), read_float(ptr + 4)};
+                } else if (attr_name == "TANGENT") {
+                    vertex.Tangent = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8), read_float(ptr + 12)};
+                }
+            }
+
+            vertices.push_back(vertex); // diff btw push_back and emplace_back //vv push_back copies or moves the object into the vector, while emplace_back constructs the object in place using the provided arguments; since vertex is already constructed, push_back is appropriate here
+        }
+
+        std::cout << "Processed mesh: " << mesh_name
+                  << " (first=" << mesh.first_vertex << ", count=" << mesh.count << ")" << std::endl;
+    }
+
+    std::cout << "Total pooled vertices: " << vertices.size() << std::endl;
 }

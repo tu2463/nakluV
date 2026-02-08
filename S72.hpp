@@ -1,4 +1,5 @@
 #include "sejp.hpp"
+#include "PosNorTexTanVertex.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -14,6 +15,10 @@ struct S72 {
 	using color = struct color_internal{ float r, g, b; };
 
     static S72 load(std::string const &file);
+    void process_meshes(); // extract vertices from binary data into pooled buffer
+
+    // Pooled vertex data (populated by process_meshes):
+    std::vector<PosNorTexTanVertex> vertices;
 
     //forward declarations so we can write the scene's objects in the same order as in the spec:
 	struct Node;
@@ -106,6 +111,9 @@ struct S72 {
         };
         std::unordered_map< std::string, Attribute > attributes;
         Material *material = nullptr; // optional, null if not specified
+
+        // Computed during process_meshes():
+        uint32_t first_vertex = 0; // index into pooled vertices buffer
     };
     std::unordered_map< std::string, Mesh> meshes;
 
