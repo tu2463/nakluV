@@ -115,3 +115,64 @@ inline mat4 look_at(
 		-right_dot_eye, -up_dot_eye, in_dot_eye, 1.0f,
 	};
 }
+//orbit camera matrix:
+// makes a camera-from-world matrix for a camera orbiting target_{x,y,z}
+//   at distance radius with angles azimuth and elevation.
+// azimuth is counterclockwise angle in the xy plane from the x axis
+// elevation is angle up from the xy plane
+// both are in radians
+inline mat4 orbit(
+		float target_x, float target_y, float target_z,
+		float azimuth, float elevation, float radius
+	) {
+
+    // shorthand for some useful trig values:
+    float ca = std::cos(azimuth);
+    float sa = std::sin(azimuth);
+    float ce = std::cos(elevation);
+    float se = std::sin(elevation);
+
+    // camera's right direction is azimuth rotated by 90 degrees:
+    float right_x = -sa;
+    float right_y = ca;
+    float right_z = 0.0f;
+
+	// camera's up direction is elevation rotated 90 degrees:
+	// (and points in the same xy direction as azimuth)
+	float up_x = -se * ca;
+	float up_y = -se * sa;
+	float up_z = ce;
+
+	// compute out direction:
+    //direction to the camera from the target:
+	float out_x = ce * ca;
+	float out_y = ce * sa;
+	float out_z = se;
+
+	// compute camera position
+	float eye_x = target_x + radius * out_x;
+	float eye_y = target_y + radius * out_y;
+	float eye_z = target_z + radius * out_z;
+
+	//camera's position projected onto the various vectors:
+	float right_dot_eye = right_x*eye_x + right_y*eye_y + right_z*eye_z;
+	float up_dot_eye    =    up_x*eye_x +    up_y*eye_y +    up_z*eye_z;
+	float out_dot_eye   =   out_x*eye_x +   out_y*eye_y +   out_z*eye_z;
+
+	//the final local-from-world transformation (column-major):
+	return mat4{
+		right_x, up_x, out_x, 0.0f,
+		right_y, up_y, out_y, 0.0f,
+		right_z, up_z, out_z, 0.0f,
+		-right_dot_eye, -up_dot_eye, -out_dot_eye, 1.0f,
+	};
+}
+
+// --
+
+constexpr mat4 mat4_identity{                                                                                                                                                                                            
+    1.0f, 0.0f, 0.0f, 0.0f,                                                                                                                                                                                              
+    0.0f, 1.0f, 0.0f, 0.0f,                                                                                                                                                                                              
+    0.0f, 0.0f, 1.0f, 0.0f,                                                                                                                                                                                              
+    0.0f, 0.0f, 0.0f, 1.0f,                                                                                                                                                                                              
+}; 
