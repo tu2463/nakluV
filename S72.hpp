@@ -115,6 +115,13 @@ struct S72 {
 
 		//computed during loading:
 		std::string path; //path to data file, taking into account path to s72 file (relative to current working directory)
+
+        /*
+        The example code does compute the correct (s72-file-relative) paths to load them from; see `DataFile::path` and `Texture::path`. It also unifies multiple references to the same file into the same object.
+
+        It would be reasonable to (e.g.) add extra data members to `DataFile` and `Texture` and load them at the end of `S72::load` just after the path computation code.
+        */
+        std::vector< uint8_t > data; //raw bytes loaded from the file
 	};
     //we organize the data files by "src" so that multiple attributes with the same src resolve to the same DataFile:
 	std::unordered_map< std::string, DataFile > data_files;

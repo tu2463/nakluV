@@ -1,6 +1,7 @@
 #include "S72.hpp"
 #include <cassert>
 #include <iostream>
+#include <fstream>
 
 //functions that do the inverse of those in vk_enum_string_helper.h :
 
@@ -989,6 +990,30 @@ S72 S72::load(std::string const &scene_file) {
 	for (auto &[key, value] : s72.textures) {
 		value.path = scene_folder + value.src;
 	}
+
+    //-----------------------------------------------------------------------
+    // load the DataFiles from disk in binary mode
+
+    for (auto &[key, data_file] : s72.data_files) {
+        // TODO: understand the read binary file into memory process
+        // Open file in binary mode, positioned at end (ate) to get size
+        std::ifstream file(data_file.path, std::ios::binary | std::ios::ate); // open, cursor at end 
+        if (!file) {
+            throw std::runtime_error("Failed to open data file \"" + data_file.path + "\".");
+        }
+
+        // Get file size (ate positions cursor at end)
+        std::streamsize size = file.tellg(); // // size = cursor position 
+        file.seekg(0, std::ios::beg); // seek back to beginning
+
+        // Allocate buffer and read entire file
+        data_file.data.resize(size);
+        if (!file.read(reinterpret_cast<char*>(data_file.data.data()), size)) {
+            throw std::runtime_error("Failed to read data file \"" + data_file.path + "\".");
+        }
+
+        std::cout << "Loaded data file: " << data_file.path << " (" << size << " bytes)" << std::endl;
+    }
 
 	return s72;
 }
