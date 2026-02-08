@@ -16,7 +16,7 @@ struct Vec3 {
     float x, y, z;
 };
 
-Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
+Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	// refsol::Tutorial_constructor(rtg, &depth_format, &render_pass, &command_pool);
 
 	// select a depth format:
@@ -398,7 +398,21 @@ Tutorial::Tutorial(RTG &rtg_) : rtg(rtg_) {
 		rtg.helpers.transfer_to_buffer(vertices.data(), bytes, object_vertices);
 	}
 
-	{ // make some textures
+	{
+		size_t bytes = s72.vertices.size() * sizeof(s72.vertices[0]);
+
+		s72_vertices = rtg.helpers.create_buffer(
+			bytes,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU copy into this memory
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+			Helpers::Unmapped // don't get a pointer to memory
+		);
+
+		// copy data to buffer
+		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, s72_vertices);
+	}
+
+	{ // make some textures for objects
 		textures.reserve(2);
 
 		{ // texture 0: white to light blue gradient
@@ -617,7 +631,8 @@ Tutorial::~Tutorial() {
 	}
 	textures.clear();
 
-	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it //??
+	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it, like the other checks //vv the type is AllocatedBuffer, is a struct that wraps the handle; the destroy_buffer function can take care of checking whether the handle is null
+	rtg.helpers.destroy_buffer(std::move(s72_vertices));
 
 	if (swapchain_depth_image.handle != VK_NULL_HANDLE) {
 		destroy_framebuffers();

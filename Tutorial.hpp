@@ -5,15 +5,17 @@
 #include "mat4.hpp"
 
 #include "RTG.hpp"
+#include "S72.hpp"
 
 struct Tutorial : RTG::Application {
 
-	Tutorial(RTG &);
+	Tutorial(RTG &, S72 &);
 	Tutorial(Tutorial const &) = delete; //you shouldn't be copying this object
 	~Tutorial();
 
 	//kept for use in destructor:
 	RTG &rtg;
+	S72 &s72;
 
 	//--------------------------------------------------------------------
 	//Resources that last the lifetime of the application:
@@ -146,6 +148,11 @@ struct Tutorial : RTG::Application {
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
+
+	//-------------------------------------------------------------------
+	//s72 scene resources:
+
+	Helpers::AllocatedBuffer s72_vertices; // buffer for vertex data extracted from s72 file
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:

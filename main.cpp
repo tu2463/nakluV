@@ -7,7 +7,7 @@
 #include <iostream>
 
 void print_info(S72 &s72){
-	std::cout << "--- Scene Objects ---"<< std::endl;
+	std::cout << "--- S72 Scene Objects ---"<< std::endl;
 	std::cout << "Scene: " << s72.scene.name << std::endl;
 	std::cout << "Roots: ";
 	for (S72::Node* root : s72.scene.roots) {
@@ -86,7 +86,7 @@ void traverse_children(S72 &s72, S72::Node* node, std::string prefix){
 }
 
 void print_scene_graph(S72 &s72){
-	std::cout << std::endl << "--- Scene Graph ---"<< std::endl;
+	std::cout << std::endl << "--- S72 Scene Graph ---"<< std::endl;
 	for (S72::Node* root : s72.scene.roots) {
 		std::cout << "Root: ";
 		std::string prefix = "";
@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
-		// load scene:
+		// load s72 scene:
 		S72 s72;
 		try {
 			s72 = S72::load(configuration.scene_file);
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
 		RTG rtg(configuration); // Creates an RTG object named rtg; Passes configuration as a parameter to the constructor
 
 		//initializes global (whole-life-of-application) resources:
-		Tutorial application(rtg);
+		Tutorial application(rtg, s72);
 
 		//main loop -- handles events, renders frames, etc:
 		rtg.run(application);

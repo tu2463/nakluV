@@ -1,3 +1,5 @@
+#pragma once // need this so that this won't be included multiple times
+
 #include "sejp.hpp"
 #include "PosNorTexTanVertex.hpp"
 
