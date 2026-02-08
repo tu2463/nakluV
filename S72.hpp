@@ -83,7 +83,7 @@ struct S72 {
         "type":"MESH",
         "name":"cube",
         "topology":"TRIANGLE_LIST",
-        "count":12,
+        "count":12, // the number of vertices in the mesh.
         "indices": { "src":"cube.b72", "offset":576, "format":"UINT32" },
         "attributes":{
             "POSITION": { "src":"cube.b72", "offset":0,  "stride":48, "format":"R32G32B32_SFLOAT" },

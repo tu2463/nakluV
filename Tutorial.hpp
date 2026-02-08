@@ -93,7 +93,8 @@ struct Tutorial : RTG::Application {
 		VkPipelineLayout layout = VK_NULL_HANDLE;
 		
 		// vertex bindings:
-		using Vertex = PosNorTexVertex;
+		// using Vertex = PosNorTexVertex; // used for tutorial code before S72 loader
+		using Vertex = PosNorTexTanVertex;
 
 		VkPipeline handle = VK_NULL_HANDLE;
 
@@ -136,23 +137,18 @@ struct Tutorial : RTG::Application {
 	//static scene resources:
 
 	Helpers::AllocatedBuffer object_vertices; // why don't we want this to be per workspace? why are lines_vertices per workspace //vv because objects are static, can share among workspaces
-	struct ObjectVertices {
-		uint32_t first = 0;
-		uint32_t count = 0;
-	};
-	ObjectVertices sphere_vertices;
-	ObjectVertices torus_vertices;
+	// struct ObjectVertices {
+	// 	uint32_t first = 0;
+	// 	uint32_t count = 0;
+	// };
+	// ObjectVertices sphere_vertices;
+	// ObjectVertices torus_vertices;
 
 	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
 	std::vector< VkImageView > texture_views;
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
-
-	//-------------------------------------------------------------------
-	//s72 scene resources:
-
-	Helpers::AllocatedBuffer s72_vertices; // buffer for vertex data extracted from s72 file
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:
@@ -180,11 +176,14 @@ struct Tutorial : RTG::Application {
 	ObjectsPipeline::World world;
 
 	struct ObjectInstance {
-		ObjectVertices vertices;
+		// ObjectVertices vertices; // previously used for tutorial code before S72 loader; now we can just reference the mesh's vertices in the pooled buffer
+		S72::Mesh *mesh; // reference to the mesh data for this object, which includes the vertex count and first vertex index into the pooled buffer
 		ObjectsPipeline::Transform transform;
 		uint32_t texture = 0;
 	};
 	std::vector< ObjectInstance > object_instances;
+
+	std::vector< S72::Mesh > s72_meshes;
 
 	//--------------------------------------------------------------------
 	//Rendering function, uses all the resources above to queue work to draw a frame:

@@ -11,6 +11,7 @@
 
 #include <random>
 #include <algorithm>
+#include <functional>
 
 struct Vec3 {
     float x, y, z;
@@ -271,120 +272,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
-	{ //create object vertices
-		std::vector< PosNorTexVertex > vertices;
-
-		{ // A sphere (using sphere_vertices variable for the sphere geometry):
-			sphere_vertices.first = uint32_t(vertices.size());
-
-			constexpr float RADIUS = 0.4f;
-			constexpr uint32_t LAT_STEPS = 16; // latitude divisions
-			constexpr uint32_t LON_STEPS = 24; // longitude divisions
-
-			auto emplace_sphere_vertex = [&](uint32_t lat_i, uint32_t lon_i) {
-				// latitude angle: from -PI/2 (south) to PI/2 (north)
-				float phi = -float(M_PI) / 2.0f + float(M_PI) * (lat_i % (LAT_STEPS + 1)) / float(LAT_STEPS);
-				// longitude angle: from 0 to 2*PI
-				float theta = 2.0f * float(M_PI) * (lon_i % LON_STEPS) / float(LON_STEPS);
-
-				float cos_phi = std::cos(phi);
-				float sin_phi = std::sin(phi);
-				float cos_theta = std::cos(theta);
-				float sin_theta = std::sin(theta);
-
-				vertices.emplace_back(PosNorTexVertex{
-					.Position{
-						.x = RADIUS * cos_phi * cos_theta,
-						.y = RADIUS * cos_phi * sin_theta,
-						.z = RADIUS * sin_phi,
-					},
-					.Normal{
-						.x = cos_phi * cos_theta,
-						.y = cos_phi * sin_theta,
-						.z = sin_phi,
-					},
-					.TexCoord{
-						.s = lon_i / float(LON_STEPS),
-						.t = lat_i / float(LAT_STEPS),
-					},
-				});
-			};
-
-			for (uint32_t lat_i = 0; lat_i < LAT_STEPS; ++lat_i) {
-				for (uint32_t lon_i = 0; lon_i < LON_STEPS; ++lon_i) {
-					emplace_sphere_vertex(lat_i, lon_i);
-					emplace_sphere_vertex(lat_i + 1, lon_i);
-					emplace_sphere_vertex(lat_i, lon_i + 1);
-
-					emplace_sphere_vertex(lat_i, lon_i + 1);
-					emplace_sphere_vertex(lat_i + 1, lon_i);
-					emplace_sphere_vertex(lat_i + 1, lon_i + 1);
-				}
-			}
-
-			sphere_vertices.count = uint32_t(vertices.size() - sphere_vertices.first);
-		}
-
-		{ // A torus:
-			torus_vertices.first = uint32_t(vertices.size());
-
-			// will parameterize with (u, v) where:
-			// - u is angle around main axis (+z)
-			// -v is angle around the tube
-
-			constexpr float R1 = 0.75f; // main radius
-			constexpr float R2 = 0.15f; // tube radius
-
-			constexpr uint32_t U_STEPS = 20;
-			constexpr uint32_t V_STEPS = 16;
-
-			// texture repeats around the torus:
-			constexpr float V_REPEATS = 2.0f;
-			constexpr float U_REPEATS = int(V_REPEATS / R2 * R1 + 0.999f); // approximately square, rounded up
-
-			auto emplace_vertex = [&](uint32_t ui, uint32_t vi)
-			{
-				// convert steps to angles:
-				//  (doing the mod since trig on 2 M_PI may not exactly match 0)
-				float ua = (ui % U_STEPS) / float(U_STEPS) * 2.0f * float(M_PI);
-				float va = (vi % V_STEPS) / float(V_STEPS) * 2.0f * float(M_PI);
-
-				vertices.emplace_back(PosNorTexVertex{
-					.Position{
-						.x = (R1 + R2 * std::cos(va)) * std::cos(ua),
-						.y = (R1 + R2 * std::cos(va)) * std::sin(ua),
-						.z = R2 * std::sin(va),
-					},
-					.Normal{
-						.x = std::cos(va) * std::cos(ua),
-						.y = std::cos(va) * std::sin(ua),
-						.z = std::sin(va),
-					},
-					.TexCoord{
-						.s = ui / float(U_STEPS) * U_REPEATS,
-						.t = vi / float(V_STEPS) * V_REPEATS,
-					},
-				});
-			};
-
-			for (uint32_t ui = 0; ui < U_STEPS; ++ui)
-			{
-				for (uint32_t vi = 0; vi < V_STEPS; ++vi)
-				{
-					emplace_vertex(ui, vi);
-					emplace_vertex(ui + 1, vi);
-					emplace_vertex(ui, vi + 1);
-
-					emplace_vertex(ui, vi + 1);
-					emplace_vertex(ui + 1, vi);
-					emplace_vertex(ui + 1, vi + 1);
-				}
-			}
-
-			torus_vertices.count = uint32_t(vertices.size() - torus_vertices.first);
-		}
-
-		size_t bytes = vertices.size() * sizeof(vertices[0]);
+	{ //create a vertex buffer for the S72 (previously create object vertices pool buffer)
+		size_t bytes = s72.vertices.size() * sizeof(s72.vertices[0]);
 
 		object_vertices = rtg.helpers.create_buffer(
 			bytes,
@@ -395,21 +284,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 
 		// copy data to buffer
 		// notice: this uploads the data during initialization instead of during the per-frame rendering loop (our rendering function Tutorial::render())// foreshadow!
-		rtg.helpers.transfer_to_buffer(vertices.data(), bytes, object_vertices);
-	}
-
-	{
-		size_t bytes = s72.vertices.size() * sizeof(s72.vertices[0]);
-
-		s72_vertices = rtg.helpers.create_buffer(
-			bytes,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU copy into this memory
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
-			Helpers::Unmapped // don't get a pointer to memory
-		);
-
-		// copy data to buffer
-		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, s72_vertices);
+		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, object_vertices);
 	}
 
 	{ // make some textures for objects
@@ -632,7 +507,6 @@ Tutorial::~Tutorial() {
 	textures.clear();
 
 	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it, like the other checks //vv the type is AllocatedBuffer, is a struct that wraps the handle; the destroy_buffer function can take care of checking whether the handle is null
-	rtg.helpers.destroy_buffer(std::move(s72_vertices));
 
 	if (swapchain_depth_image.handle != VK_NULL_HANDLE) {
 		destroy_framebuffers();
@@ -1124,7 +998,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				0, nullptr // dynamic offsets count, ptr
 			);
 
-			vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index);
+			// vkCmdDraw(workspace.command_buffer, inst.vertices.count, 1, inst.vertices.first, index); // Prev for drawing objects
+			vkCmdDraw(workspace.command_buffer, inst.mesh->count, 1, inst.mesh->first_vertex, index);
 		}
 	}
 
@@ -1272,49 +1147,161 @@ void Tutorial::update(float dt) {
 		assert(lines_vertices.size() == count);
 	}
 
-	{ // make some objects: sphere surrounded by rotating torus; //TODO: understand this
+	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus //TODO: understand this)
 		object_instances.clear();
 
-		{ // sphere at center
-			mat4 WORLD_FROM_LOCAL{ // sphere at origin
+		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
+
+		// 2. Building Local Transform from node's TRS (Translation, Rotation Scale: local = Translation × Rotation × Scale      
+		// Where: Translation = mat4 with (tx, ty, tz) in last column; Rotation = quaternion (x,y,z,w) → 3x3 rotation matrix; Scale = diagonal mat4 with (sx, sy, sz, 1)  
+
+		//TODO: understand these helpers
+		// helper: make translation matrix from S72::vec3
+		auto translate = [](S72::vec3 const &t) -> mat4 {
+			return mat4{
 				1.0f, 0.0f, 0.0f, 0.0f,
 				0.0f, 1.0f, 0.0f, 0.0f,
 				0.0f, 0.0f, 1.0f, 0.0f,
+				t.x,  t.y,  t.z,  1.0f,
+			};
+		};
+
+		// helper: scale matrix
+		auto scale = [](S72::vec3 const &s) -> mat4 {
+			return mat4{
+				s.x, 0.0f, 0.0f, 0.0f,
+				0.0f, s.y, 0.0f, 0.0f,
+				0.0f, 0.0f, s.z, 0.0f,
 				0.0f, 0.0f, 0.0f, 1.0f,
 			};
+		};
 
-			object_instances.emplace_back(ObjectInstance{
-				.vertices = sphere_vertices, // TODO: understand this
-				.transform{
-					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
-					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
-					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
-				},
-				.texture = 0,
-			});
-		}
-		{ // torus surrounding sphere, rotating around it
-			float ang = time / 60.0f * 2.0f * float(M_PI) * 10.0f;
-			float ca = std::cos(ang);
-			float sa = std::sin(ang);
-			// rotate around Y axis, centered at origin
-			mat4 WORLD_FROM_LOCAL{
-				  ca, 0.0f,  -sa, 0.0f,
-				0.0f, 1.0f, 0.0f, 0.0f,
-				  sa, 0.0f,   ca, 0.0f,
-				0.0f, 0.0f, 0.0f, 1.0f,
+		// helper: rotation matrix from quaternion (column-major)
+		auto rotation_from_quat = [](S72::quat const &q) -> mat4 {
+			float x = q.x, y = q.y, z = q.z, w = q.w;
+			float xx = x * x, yy = y * y, zz = z * z;
+			float xy = x * y, xz = x * z, yz = y * z;
+			float wx = w * x, wy = w * y, wz = w * z;
+			// 3x3 rotation
+			float m00 = 1.0f - 2.0f * (yy + zz);
+			float m01 = 2.0f * (xy - wz);
+			float m02 = 2.0f * (xz + wy);
+
+			float m10 = 2.0f * (xy + wz);
+			float m11 = 1.0f - 2.0f * (xx + zz);
+			float m12 = 2.0f * (yz - wx);
+
+			float m20 = 2.0f * (xz - wy);
+			float m21 = 2.0f * (yz + wx);
+			float m22 = 1.0f - 2.0f * (xx + yy);
+
+			return mat4{
+				m00, m10, m20, 0.0f,
+				m01, m11, m21, 0.0f,
+				m02, m12, m22, 0.0f,
+				0.0f,0.0f,0.0f,1.0f,
 			};
+		};
 
-			object_instances.emplace_back(ObjectInstance{
-				.vertices = torus_vertices,
-				.transform{
-					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
-					.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
-					.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
-				},
-				.texture = 1,
-			});
+		// helper: transpose a mat4
+		auto transpose = [](mat4 const &A) -> mat4 {
+			mat4 R;
+			for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r) R[c*4 + r] = A[r*4 + c];
+			return R;
+		};
+
+		// helper: inverse of an affine mat4 (bottom row = 0,0,0,1). If not invertible, returns identity.
+		auto inverse_affine = [](mat4 const &M) -> mat4 {
+			// Extract upper-left 3x3 (column-major)
+			float a00 = M[0], a10 = M[1], a20 = M[2];
+			float a01 = M[4], a11 = M[5], a21 = M[6];
+			float a02 = M[8], a12 = M[9], a22 = M[10];
+
+			// compute determinant
+			float det = a00*(a11*a22 - a12*a21) - a01*(a10*a22 - a12*a20) + a02*(a10*a21 - a11*a20);
+			if (std::fabs(det) < 1e-12f) return mat4_identity;
+			float invdet = 1.0f / det;
+
+			// inverse 3x3 = adjugate / det
+			float b00 =  (a11*a22 - a12*a21) * invdet;
+			float b01 = -(a01*a22 - a02*a21) * invdet;
+			float b02 =  (a01*a12 - a02*a11) * invdet;
+
+			float b10 = -(a10*a22 - a12*a20) * invdet;
+			float b11 =  (a00*a22 - a02*a20) * invdet;
+			float b12 = -(a00*a12 - a02*a10) * invdet;
+
+			float b20 =  (a10*a21 - a11*a20) * invdet;
+			float b21 = -(a00*a21 - a01*a20) * invdet;
+			float b22 =  (a00*a11 - a01*a10) * invdet;
+
+			// translation vector
+			float tx = M[12], ty = M[13], tz = M[14];
+
+			// invT = -invM * t
+			float itx = -(b00*tx + b01*ty + b02*tz);
+			float ity = -(b10*tx + b11*ty + b12*tz);
+			float itz = -(b20*tx + b21*ty + b22*tz);
+
+			mat4 R;
+			// column 0
+			R[0] = b00; R[1] = b10; R[2] = b20; R[3] = 0.0f;
+			// column 1
+			R[4] = b01; R[5] = b11; R[6] = b21; R[7] = 0.0f;
+			// column 2
+			R[8] = b02; R[9] = b12; R[10] = b22; R[11] = 0.0f;
+			// column 3 (translation)
+			R[12] = itx; R[13] = ity; R[14] = itz; R[15] = 1.0f;
+			return R;
+		};
+
+		// recursive traversal
+		std::function< void(S72::Node*, mat4 const &) > traverse = [&](S72::Node* node, mat4 const &parent_world) {
+			// build local TRS = Translation * Rotation * Scale
+			mat4 local = translate(node->translation) * rotation_from_quat(node->rotation) * scale(node->scale);
+			mat4 world = parent_world * local; // child's world = parent_world × local
+
+			if (node->mesh != nullptr) {
+				ObjectsPipeline::Transform tf;
+				tf.WORLD_FROM_LOCAL = world;
+				tf.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * world;
+				tf.WORLD_FROM_LOCAL_NORMAL = transpose(inverse_affine(world));
+
+				object_instances.emplace_back(ObjectInstance{
+					.mesh = node->mesh,
+					.transform = tf,
+					.texture = 0,
+				});
+			}
+
+			for (S72::Node* child : node->children) {
+				traverse(child, world);
+			}
+		};
+
+		// start traversal from roots using identity as parent
+		for (S72::Node* root : s72.scene.roots) {
+			if (root) traverse(root, mat4_identity);
 		}
+		
+		// { // previous: sphere at center
+		// 	mat4 WORLD_FROM_LOCAL{ // sphere at origin
+		// 		1.0f, 0.0f, 0.0f, 0.0f,
+		// 		0.0f, 1.0f, 0.0f, 0.0f,
+		// 		0.0f, 0.0f, 1.0f, 0.0f,
+		// 		0.0f, 0.0f, 0.0f, 1.0f,
+		// 	};
+
+		// 	object_instances.emplace_back(ObjectInstance{
+		// 		.vertices = sphere_vertices, // TODO: understand this
+		// 		.transform{
+		// 			.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
+		// 			.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
+		// 			.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
+		// 		},
+		// 		.texture = 0,
+		// 	});
+		// }
 	}
 }
 
