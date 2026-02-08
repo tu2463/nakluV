@@ -115,7 +115,8 @@ inline mat4 look_at(
 		-right_dot_eye, -up_dot_eye, in_dot_eye, 1.0f,
 	};
 }
-//orbit camera matrix:
+
+//orbit camera matrix: understand this //??
 // makes a camera-from-world matrix for a camera orbiting target_{x,y,z}
 //   at distance radius with angles azimuth and elevation.
 // azimuth is counterclockwise angle in the xy plane from the x axis
@@ -167,8 +168,6 @@ inline mat4 orbit(
 		-right_dot_eye, -up_dot_eye, -out_dot_eye, 1.0f,
 	};
 }
-
-// --
 
 constexpr mat4 mat4_identity{                                                                                                                                                                                            
     1.0f, 0.0f, 0.0f, 0.0f,                                                                                                                                                                                              

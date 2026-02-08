@@ -1046,9 +1046,9 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
 
-	{ // camera orbiting the origin:
+	if (camera_mode == CameraMode::Scene) { // camera rotating the origin:
 		float ang = float(M_PI) * 2.0f * 10.0f * (time / 60.0f);
-		CLIP_FROM_WORLD = perspective( // TODO: understand this
+		CLIP_FROM_WORLD = perspective( // understand this //??
 			60.0f * float(M_PI) / 180.0f, //vfov
 			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
 			0.1f, //near
@@ -1058,6 +1058,18 @@ void Tutorial::update(float dt) {
 			0.0f, 0.0f, 0.5f, //target
 			0.0f, 0.0f, 1.0f //up
 		);
+	} else if (camera_mode == CameraMode::Free) { // understand this //??
+		CLIP_FROM_WORLD = perspective(
+			free_camera.fov,
+			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
+			free_camera.near,
+			free_camera.far
+		) * orbit(
+			free_camera.target_x, free_camera.target_y, free_camera.target_z,
+			free_camera.azimuth, free_camera.elevation, free_camera.radius
+		);
+	} else {
+		assert(0 && "only two camera modes");
 	}
 
 	{ // static sun and sky
