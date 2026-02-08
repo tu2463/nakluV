@@ -167,6 +167,9 @@ struct Tutorial : RTG::Application {
 	virtual void update(float dt) override;
 	virtual void on_input(InputEvent const &) override;
 
+	//modal action, intercepts inputs:
+	std::function< void(InputEvent const &) > action;
+	
 	float time = 0.0f;
 
 	//for selecting between cameras:

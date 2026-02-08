@@ -3,6 +3,8 @@
 #include "VK.hpp"
 // #include "refsol.hpp"
 
+#include <GLFW/glfw3.h>
+
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -1318,5 +1320,104 @@ void Tutorial::update(float dt) {
 }
 
 
-void Tutorial::on_input(InputEvent const &) {
+void Tutorial::on_input(InputEvent const &evt) { // review/understand this //??
+	//if there is a current action, it gets input priority:
+	if (action) { // where is this action function defined //??
+		action(evt);
+		return;
+	}
+
+	// general controls:
+	if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_TAB) { // tab key
+		// switch cameras modes
+		camera_mode = CameraMode((int(camera_mode) + 1) % 2);
+		return; // returns since we don't want any later event handling code to be allowed to respond to the tab key
+	}
+
+	// free camera controls:
+	if (camera_mode == CameraMode::Free) {
+		if (evt.type == InputEvent::MouseWheel) {
+			// change distance by 10% every scroll click:
+			free_camera.radius *= std::exp(std::log(1.1f) * -evt.wheel.y);
+			// make sure camera isn't too close or too far from target:
+			free_camera.radius = std::max(free_camera.radius, 0.5f * free_camera.near); // it's kinda like setting the min and max spirng arm length in UE?
+			free_camera.radius = std::min(free_camera.radius, 2.0f * free_camera.far);
+			return;
+		}
+
+		if (evt.type == InputEvent::MouseButtonDown && evt.button.button == GLFW_MOUSE_BUTTON_LEFT && (evt.button.mods & GLFW_MOD_SHIFT)) {
+			//start panning
+			float init_x = evt.button.x;
+			float init_y = evt.button.y;
+			OrbitCamera init_camera = free_camera;
+
+			action = [this,init_x,init_y,init_camera](InputEvent const &evt) {
+				if (evt.type == InputEvent::MouseButtonUp && evt.button.button == GLFW_MOUSE_BUTTON_LEFT) {
+					//cancel upon button lifted:
+					action = nullptr;
+					return;
+				}
+				if (evt.type == InputEvent::MouseMotion) {
+					// handle motion:
+					//image height at plane of target point:
+					float height = 2.0f * std::tan(free_camera.fov * 0.5f) * free_camera.radius;
+
+					//motion, therefore, at target point:
+					float dx = (evt.motion.x - init_x) / rtg.swapchain_extent.height * height;
+					float dy =-(evt.motion.y - init_y) / rtg.swapchain_extent.height * height; //note: negated because glfw uses y-down coordinate system
+
+					//compute camera transform to extract right (first row) and up (second row):
+					mat4 camera_from_world = orbit(
+						init_camera.target_x, init_camera.target_y, init_camera.target_z,
+						init_camera.azimuth, init_camera.elevation, init_camera.radius
+					);
+
+					//move the desired distance:
+					free_camera.target_x = init_camera.target_x - dx * camera_from_world[0] - dy * camera_from_world[1];
+					free_camera.target_y = init_camera.target_y - dx * camera_from_world[4] - dy * camera_from_world[5];
+					free_camera.target_z = init_camera.target_z - dx * camera_from_world[8] - dy * camera_from_world[9];
+					return;
+				}
+			};
+
+			return;
+		}
+
+		if (evt.type == InputEvent::MouseButtonDown && evt.button.button == GLFW_MOUSE_BUTTON_LEFT) {
+			//start tumbling // what is tumbling //??
+
+			// std::cout << "Tumble started." << std::endl;
+			float init_x = evt.button.x;
+			float init_y = evt.button.y;
+			OrbitCamera init_camera = free_camera;
+			
+			action = [this,init_x,init_y,init_camera](InputEvent const &evt) {
+				if (evt.type == InputEvent::MouseButtonUp && evt.button.button == GLFW_MOUSE_BUTTON_LEFT) {
+					//cancel upon button lifted:
+					action = nullptr;
+					// std::cout << "Tumble ended." << std::endl;
+					return;
+				}
+				if (evt.type == InputEvent::MouseMotion) {
+					// handle motion, normalized so 1.0 is window height:
+					float dx = (evt.motion.x - init_x) / rtg.swapchain_extent.height;
+					float dy =-(evt.motion.y - init_y) / rtg.swapchain_extent.height; //note: negated because glfw uses y-down coordinate system
+
+					//rotate camera based on motion:
+					float speed = float(M_PI); //how much rotation happens at one full window height
+					float flip_x = (std::abs(init_camera.elevation) > 0.5f * float(M_PI) ? -1.0f : 1.0f); //switch azimuth rotation when camera is upside-down
+					free_camera.azimuth = init_camera.azimuth - dx * speed * flip_x;
+					free_camera.elevation = init_camera.elevation - dy * speed;
+
+					//reduce azimuth and elevation to [-pi,pi] range:
+					const float twopi = 2.0f * float(M_PI);
+					free_camera.azimuth -= std::round(free_camera.azimuth / twopi) * twopi;
+					free_camera.elevation -= std::round(free_camera.elevation / twopi) * twopi;
+					return;
+				}
+			};
+
+			return;
+		}
+	}
 }

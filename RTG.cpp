@@ -963,8 +963,9 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 		return;
 	}
   
-	event.key.key = uint8_t(key); 
-	event.key.mods = uint8_t(mods);
+	// event.key.key = uint8_t(key); // BUG: truncates to 8 bits. e.g. the tab key is 258 (100000010), which will be truncated to 2 (00000010), causing it to not match with GLFW_KEY_TAB
+	event.key.key = key;
+	event.key.mods = mods; // the mod flgas are small to enough to fit in the uint8_t without truncation, so we can either convert them to uint8_t (like in mouse_button_call) or now like here
 
 	event_queue->emplace_back(event);
 }
