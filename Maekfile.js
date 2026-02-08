@@ -33,6 +33,8 @@ const main_objs = [
 	maek.CPP('RTG.cpp'),
 	maek.CPP('Helpers.cpp'),
 	maek.CPP('main.cpp'),
+	maek.CPP("sejp.cpp"),
+	maek.CPP("S72.cpp"),
 ];
 
 //maek.GLSLC(...) builds a glsl source file:

@@ -1,4 +1,6 @@
 #include "S72.hpp"
+#include <cassert>
+#include <iostream>
 
 //functions that do the inverse of those in vk_enum_string_helper.h :
 
@@ -296,7 +298,7 @@ S72 S72::load(std::string const &scene_file) {
     }
 
     // check magic value:
-    if (!(array->size() >= 1 && array->at(0).as_string() && array->at(0).as_string.value() == "s72-v2")) {
+    if (!(array->size() >= 1 && array->at(0).as_string() && array->at(0).as_string().value() == "s72-v2")) {
         throw std::runtime_error("First element of s72 array should be \"s72-v2\".");
     }
 
@@ -560,10 +562,6 @@ S72 S72::load(std::string const &scene_file) {
             //(s72 leaves open the possibility of other camera projections, but does not define any) //??
 			bool have_projection = false;
 
-            if (!have_projection) {
-				throw std::runtime_error("Camera \"" + name + "\" does not have a projection.");
-			}
-
             if (auto f = object.find("perspective"); f != object.end()) {
 				//make sure there aren't multiple projections on this camera:
 				if (have_projection) {
@@ -592,6 +590,10 @@ S72 S72::load(std::string const &scene_file) {
 				warn_on_unhandled(obj, "Material \"" + name + "\"'s perspective");
 
 				object.erase(f);
+			}
+            
+            if (!have_projection) {
+				throw std::runtime_error("Camera \"" + name + "\" does not have a projection.");
 			}
         } else if (type == "DRIVER") {
             //NOTE: not building into an existing object because we need to have a node reference ready when constructing.

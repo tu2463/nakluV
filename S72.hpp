@@ -142,7 +142,7 @@ struct S72 {
 		//(s72 leaves open the possibility of other camera projections, but does not define any)
         std::variant< Perspective > projection;
     };
-    Camera cameras;
+    std::unordered_map< std::string, Camera > cameras;
 
     /* zero or more "DRIVER"s, all with unique names:
     {
@@ -206,27 +206,27 @@ struct S72 {
         "displacementMap":{ "src":"displacement.png" },
         "pbr":{
             "albedo": [0.5, 0.5, 0.85],
-            /* xor 
+            // xor 
             "albedo": { "src":"blue.png" },
 
             "roughness": 0.5,
-            /* xor 
+            // xor 
             "roughness": { "src":"roughness-map.png" },
 
             "metalness": 0.0,
-            /* xor 
+            // xor 
             "metalness": { "src":"metalness-map.png" }
         },
-        /* xor 
+        // xor 
         "lambertian": {
             "albedo": [0.5, 0.5, 0.85],
-            /* xor 
+            // xor 
             "albedo": { "src":"blue.png" }
         },
-        /* xor 
-        "mirror": { /* no parameters  },
-        /* xor 
-        "environment": { /* no parameters  },
+        // xor 
+        "mirror": { // no parameters  },
+        // xor 
+        "environment": { // no parameters  },
     },
     */
     struct Material {
@@ -245,8 +245,10 @@ struct S72 {
 		struct Lambertian {
 			std::variant< color, Texture * > albedo = color{.r = 1.0f, .g = 1.0f, .b = 1.0f};
 		};
-		struct Mirror { /* no parameters */ };
-		struct Environment { /* no parameters */ };
+
+        // no parameters:
+		struct Mirror {};
+		struct Environment {};
 
 		std::variant< PBR, Lambertian, Mirror, Environment > brdf;
 	};
