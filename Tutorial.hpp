@@ -3,6 +3,7 @@
 #include "PosColVertex.hpp"
 #include "PosNorTexVertex.hpp"
 #include "mat4.hpp"
+#include "vec3.hpp"
 
 #include "RTG.hpp"
 #include "S72.hpp"
@@ -168,6 +169,7 @@ struct Tutorial : RTG::Application {
 	virtual void on_input(InputEvent const &) override;
 
 	//modal action, intercepts inputs:
+	// an event handling function that gets all input until cancelled
 	std::function< void(InputEvent const &) > action;
 
 	float time = 0.0f;
@@ -179,11 +181,11 @@ struct Tutorial : RTG::Application {
 		Debug = 2,
 	} camera_mode = CameraMode::User;
 
-	struct CameraInstance {
+	struct SceneCamera {
 		S72::Camera *camera; // reference to the camera data for this object, which includes projection (vfov, aspect, near, far)   
 		mat4 WORLD_FROM_LOCAL; // is this optional //?? for scene camera's world position/orientation 
 	};
-	std::vector< CameraInstance > scene_camera_instances;
+	std::vector< SceneCamera > scene_camera_instances;
 	uint8_t active_scene_camera = 0; // index into scene_camera_instances of the currently active camera, used when camera_mode == CameraMode::Scene
 
 	struct OrbitCamera {
@@ -197,6 +199,10 @@ struct Tutorial : RTG::Application {
 		float far = 1000.0f; //far clipping plane
 	} free_camera;
 
+	OrbitCamera debug_camera; // TODO: increase usefulness by etting the debug camera to a position that can see the whole scene
+	// std::variant< SceneCamera, OrbitCamera > culling_camera = free_camera; // previously active camera // FIXED-BUG: can't save a pointer to 2 types, so save the prev mode and mode and CLIP_FROM_WORLD to compute fructum
+  	mat4 CLIP_FROM_WORLD_CULLING;  // the culling frustum matrix  
+	
 	//computed from the current camera (as set by camera_mode) during update():
 	mat4 CLIP_FROM_WORLD;
 

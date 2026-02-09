@@ -68,6 +68,42 @@
 	"camera":"Camera-Side"
 },
 {
+	"type":"CAMERA",
+	"name":"Camera-ClipFar",
+	"perspective":{
+		"aspect":1.5,
+		"vfov":0.5,
+		"near":0.05,
+		"far":1
+	}
+},
+{
+	"type":"NODE",
+	"name":"Camera-ClipFar",
+	"translation":[30,0,5],
+	"rotation":[0.5,0.5,0.5,0.5],
+	"scale":[1,1,1],
+	"camera":"Camera-ClipFar"
+},
+{
+	"type":"CAMERA",
+	"name":"Camera-ClipShort",
+	"perspective":{
+		"aspect":1.5,
+		"vfov":0.5,
+		"near":100,
+		"far":150
+	}
+},
+{
+	"type":"NODE",
+	"name":"Camera-ClipShort",
+	"translation":[30,0,5],
+	"rotation":[0.5,0.5,0.5,0.5],
+	"scale":[1,1,1],
+	"camera":"Camera-ClipShort"
+},
+{
 
 	"type":"LIGHT",
 	"name":"Light-Sphere",
@@ -208,6 +244,6 @@
 {
 	"type":"SCENE",
 	"name":"example-scene",
-	"roots":["!environment:environment.png", "Camera", "Camera-Top", "Camera-Side", "Light-Sphere", "Light-Spot", "Plane"]
+	"roots":["!environment:environment.png", "Camera", "Camera-Top", "Camera-Side", "Camera-ClipFar", "Camera-ClipShort", "Light-Sphere", "Light-Spot", "Plane"]
 }
 ]
