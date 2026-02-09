@@ -78,6 +78,14 @@ code var {
 	font-style:italic;
 }
 
+video {
+	display:block;
+	margin: 10px auto;
+	max-width:100%;
+	border-radius:4px;
+	box-shadow:0 0 5px #0008;
+}
+
 .atag {
 	font-family: 'Calistoga', serif;
 	font-size:90%;
@@ -202,6 +210,30 @@ Describe, in a few sentences, how your display code goes from your internal scen
 Provide function and structure names for us to examine.
 </p>
 
+<p class="answer">
+The S72 struct holds parsed scene data (nodes, meshes, cameras) in DataFile. In Tutorial::update(), a recursive traverse() lambda function walks the scene graph from s72.scene.roots, computing world transforms by multiplying parent × local (Translation * Rotation * Scale) matrices.
+</p>
+
+<p class="answer">
+For each node with a mesh, an ObjectInstance is created containing the S72::Mesh* pointer and ObjectsPipeline::Transform matrices (CLIP_FROM_LOCAL, WORLD_FROM_LOCAL, WORLD_FROM_LOCAL_NORMAL).
+</p>
+
+<p class="answer">
+For each node with a camera, an SceneCamera is created containing the S72::Camera* pointer and the WORLD_FROM_LOCAL matrix.
+</p>
+
+<p class="answer">
+When loading the s72 scene, all vertices are pooled into std::vector<PosNorTexTanVertex> vertices. 
+</p>
+
+<p class="answer">
+In Tutorial constructor, those vertices data is copied into the object_vertices vertex buffer, bound to binding = 0, 
+</p>
+
+<p class="answer">
+In Tutorial::render(), transforms are uploaded to the GPU Transforms buffer. Each ObjectInstance is drawn via vkCmdDraw(cmd, mesh->count, 1, mesh->first_vertex, index) using the pooled object_vertices buffer.
+</p>
+
 <p class="placeholder">
 Provide evidence that your code can display s72 scenes.
 Good evidence: screen shots or movies showing that example scene files load correctly.
@@ -212,16 +244,42 @@ Spend some time thinking about corner cases that the provided examples may not t
 If you develop a test case for these, include the s72 and b72 files with your report as well.
 </p>
 
+<p class="answer">
+Created example-more-cameras.s72 with five cameras, including two edge-case cameras with extreme near/far clippings for testing the frustum drawing.
+</p>
+
 <h3>Scene Display &mdash; Interaction <span class="atag">A1-show</span></h3>
 
 <p class="placeholder">
 Describe how your code handles camera handling and switching.
 </p>
 
+<p class="answer">
+Three camera modes are supported via the CameraMode enum: Scene, User, and Debug.
+</p>
+
+<p class="answer">
+Scene mode: Uses cameras from the S72 scene graph. During traversal, camera nodes are collected with their world transforms and projection settings and stored into a vector of SceneCamera structs. Users can cycle between scene cameras with Space key.
+</p>
+
+<p class="answer">
+User mode: An OrbitCamera controlled by mouse (drag to rotate, scroll to zoom) and keyboard. Computes view matrix via the orbit() function.
+</p>
+
+<p class="answer">
+Debug mode: Renders from a second user-controlled OrbitCamera while displaying the previously-active camera's frustum as yellow lines. Frustum corners are computed by transforming clip-space points through CLIP_FROM_WORLD_CULLING, which stores the previously-active camera’s CLIP_FROM_WORLD.
+</p>
+
+<p class="answer">
+Camera switching uses keys 1/2/3, with --camera flag setting the initial mode.
+</p>
+
 <p class="placeholder">
 Provide evidence that these interactions work.
 Possible evidence: a screen recording showing debug, user, and scene camera switching and interactive movement of the debug and user cameras.
 </p>
+
+<video><source src="A1-show-1.mp4" type="video/mp4" /></video>
 
 <h3>Frustum culling <span class="atag">A1-cull</span></h3>
 

@@ -964,12 +964,12 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	if (!object_instances.empty()) { // draw with the objects pipeline
 		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, objects_pipeline.handle);
 
-		{// use object vertices (offset 0) as vertex buffer binding 0: // what does offset 0. and vertex buffer binding mean //??
+		{// use object vertices (offset 0) as vertex buffer binding 0: // what does offset 0. and vertex buffer binding mean //vv The shader expects vertex data at binding 0. When you call vkCmdBindVertexBuffers(..., 0, ...), you're saying "attach this buffer to binding 0." 
 			std::array< VkBuffer, 1 > vertex_buffers{ object_vertices.handle };
-			std::array< VkDeviceSize, 1 > offsets{ 0 };
+			std::array< VkDeviceSize, 1 > offsets{ 0 }; // tells Where in that buffer the data starts 
 			vkCmdBindVertexBuffers(
 				workspace.command_buffer,
-				0,
+				0, // first binding; this corresponds to the "binding = 0" in the vertex shader's input definitions (VkVertexInputAttributeDescription from PosNorTexVertex.cpp)
 				uint32_t(vertex_buffers.size()),
 				vertex_buffers.data(),
 				offsets.data()
@@ -1071,7 +1071,7 @@ void Tutorial::update(float dt) {
 		});
 	};
 
-	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus //TODO: understand this)
+	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus)
 		// TODO: can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
 		object_instances.clear();
 
@@ -1080,7 +1080,7 @@ void Tutorial::update(float dt) {
 		// 2. Building Local Transform from node's TRS (Translation, Rotation Scale: local = Translation × Rotation × Scale      
 		// Where: Translation = mat4 with (tx, ty, tz) in last column; Rotation = quaternion (x,y,z,w) → 3x3 rotation matrix; Scale = diagonal mat4 with (sx, sy, sz, 1)  
 
-		// understand these helpers //??
+		// TODO: clean up
 		// helper: make translation matrix from S72::vec3
 		auto translate = [](S72::vec3 const &t) -> mat4 {
 			return mat4{

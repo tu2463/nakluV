@@ -20,13 +20,14 @@ void main() {
     // outColor = vec4(fract(texCoord), 0.0, 1.0);
 
     // with lighting:
+    // Basic hemispherical lighting equation in glsl syntax, where: n is the per-pixel normal (remember to normalize after interpolation!); texCoord is the interpolated texture coordinate; *_DIRECTION are uniforms giving the light directions; *_ENERGY are uniforms giving the light energy in appropriate units; ALBEDO is the albedo texture; and outColor is the value that gets written to the framebuffer.
     vec3 n = normalize(normal);
     vec3 albedo = texture(TEXTURE, texCoord).rgb;
     // hemisphere sky + directional sun TODO: understand this
     vec3 e = SKY_ENERGY * (0.5 * dot(n, SKY_DIRECTION) + 0.5)
            + SUN_ENERGY * max(0.0, dot(n, SUN_DIRECTION));
 
-    // // TODO: understand this - models a hemisphere directly above the scene that contributes one unit each of incoming red, green, and blue energy to a point with a directly-upward-facing normal.
+    // // understand this - models a hemisphere directly above the scene that contributes one unit each of incoming red, green, and blue energy to a point with a directly-upward-facing normal//??
     // vec3 n = normalize(normal);
     // vec3 l = vec3(0.0, 0.0, 1.0);
     // vec3 albedo = texture(TEXTURE, texCoord).rgb;
