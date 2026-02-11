@@ -865,7 +865,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	// put GPU commands here
 	//render pass:
 	std::array< VkClearValue, 2 > clear_values{
-		VkClearValue{ .color{ .float32{ 0.54, 0.35, 0.80, 1.0f } } },
+		// VkClearValue{ .color{ .float32{ 0.54, 0.35, 0.80, 1.0f } } }, // light purple; 
+		VkClearValue{ .color{ .float32{ 0,0,0, 1.0f } } },
 		VkClearValue{ .depthStencil{ .depth = 1.0f, .stencil = 0 } },
 	};
 
@@ -884,19 +885,44 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	vkCmdBeginRenderPass(workspace.command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
 	// run pipelines here:
+	// Calculate viewport dimensions, handling letterbox/pillarbox for scene cameras
+	float viewport_x = 0.0f;
+	float viewport_y = 0.0f;
+	float viewport_width = float(rtg.swapchain_extent.width);
+	float viewport_height = float(rtg.swapchain_extent.height);
+
+	if (camera_mode == CameraMode::Scene && !scene_camera_instances.empty()) {
+		SceneCamera const &cam = scene_camera_instances[active_scene_camera];
+		S72::Camera::Perspective& projection = std::get<S72::Camera::Perspective>(cam.camera->projection);
+
+		float camera_aspect = projection.aspect;
+		float window_aspect = float(rtg.swapchain_extent.width) / float(rtg.swapchain_extent.height);
+
+		if (window_aspect > camera_aspect) {
+			// Window is too wide -> pillarbox (black bars on left/right)
+			viewport_width = viewport_height * camera_aspect;
+			viewport_x = (float(rtg.swapchain_extent.width) - viewport_width) * 0.5f;
+		} else if (window_aspect < camera_aspect) {
+			// Window is too narrow -> letterbox (black bars on top/bottom)
+			viewport_height = viewport_width / camera_aspect;
+			viewport_y = (float(rtg.swapchain_extent.height) - viewport_height) * 0.5f;
+		}
+		// If aspects match exactly, no adjustment needed
+	}
+
 	{ // set scissor rectangle:
 		VkRect2D scissor{
-			.offset = {.x = 0, .y = 0},
-			.extent = rtg.swapchain_extent,
+			.offset = {.x = int32_t(viewport_x), .y = int32_t(viewport_y)},
+			.extent = {.width = uint32_t(viewport_width), .height = uint32_t(viewport_height)},
 		};
 		vkCmdSetScissor(workspace.command_buffer, 0, 1, &scissor);
 	}
 	{ // configure viewport transform:
 		VkViewport viewport{
-			.x = 0.0f,
-			.y = 0.0f,
-			.width = float(rtg.swapchain_extent.width),
-			.height = float(rtg.swapchain_extent.height),
+			.x = viewport_x,
+			.y = viewport_y,
+			.width = viewport_width,
+			.height = viewport_height,
 			.minDepth = 0.0f,
 			.maxDepth = 1.0f,
 		};
