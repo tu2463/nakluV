@@ -297,28 +297,11 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, object_vertices);
 	}
 
-	{ // make some textures for objects
-		textures.reserve(2);
-
-		{ // texture 0: white to light blue gradient
-			uint32_t size = 128;
-			std::vector<uint32_t> data;
-			data.reserve(size * size);
-			for (uint32_t y = 0; y < size; ++y)
-			{
-				float t = y / float(size - 1); // 0 at top, 1 at bottom
-				// white (255,255,255) to light blue (180,210,255)
-				uint8_t r = uint8_t(255.0f - t * 75.0f);
-				uint8_t g = uint8_t(255.0f - t * 45.0f);
-				uint8_t b = 255;
-				uint8_t a = 255;
-				uint32_t pixel = uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24);
-				for (uint32_t x = 0; x < size; ++x)
-				{
-					data.emplace_back(pixel);
-				}
-			}
-			assert(data.size() == size * size);
+	{ // make textures for objects from S72 scene textures
+		// First, create a default white texture (index 0) for materials without textures
+		{
+			uint32_t size = 1;
+			std::vector<uint32_t> data = {0xFFFFFFFF}; // white pixel (RGBA)
 
 			textures.emplace_back(rtg.helpers.create_image(
 				VkExtent2D{.width = size, .height = size},
@@ -331,36 +314,45 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
 		}
 
-		{ // texture 1: light blue to dark gray gradient
-			uint32_t size = 256;
-			std::vector<uint32_t> data;
-			data.reserve(size * size);
-			for (uint32_t y = 0; y < size; ++y)
-			{
-				float t = y / float(size - 1); // 0 at top, 1 at bottom
-				// light blue (180,210,255) to dark gray (60,60,60)
-				uint8_t r = uint8_t(180.0f - t * 120.0f);
-				uint8_t g = uint8_t(210.0f - t * 150.0f);
-				uint8_t b = uint8_t(255.0f - t * 195.0f);
-				uint8_t a = 255;
-				uint32_t pixel = uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24);
-				for (uint32_t x = 0; x < size; ++x)
-				{
-					data.emplace_back(pixel);
-				}
+		// Now load textures from S72
+		for (auto &[key, s72_texture] : s72.textures) {
+			// Skip textures that failed to load (empty pixels)
+			if (s72_texture.pixels.empty()) {
+				std::cerr << "WARNING: Skipping texture with empty pixels: " << s72_texture.src << std::endl;
+				continue;
 			}
-			assert(data.size() == size * size);
+
+			// Record the texture index for this S72 texture
+			uint32_t texture_index = static_cast<uint32_t>(textures.size());
+			texture_index_map[&s72_texture] = texture_index;
+
+			// Choose format based on the texture's format specification
+			VkFormat format;
+			switch (s72_texture.format) {
+				case S72::Texture::Format::srgb:
+					format = VK_FORMAT_R8G8B8A8_SRGB;
+					break;
+				case S72::Texture::Format::linear:
+				case S72::Texture::Format::rgbe:
+				default:
+					format = VK_FORMAT_R8G8B8A8_UNORM;
+					break;
+			}
 
 			textures.emplace_back(rtg.helpers.create_image(
-				VkExtent2D{.width = size, .height = size},
-				VK_FORMAT_R8G8B8A8_SRGB,
+				VkExtent2D{.width = static_cast<uint32_t>(s72_texture.width), .height = static_cast<uint32_t>(s72_texture.height)},
+				format,
 				VK_IMAGE_TILING_OPTIMAL,
 				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 				Helpers::Unmapped));
 
-			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
+			rtg.helpers.transfer_to_image(s72_texture.pixels.data(), s72_texture.pixels.size(), textures.back());
+
+			std::cout << "Created GPU texture for: " << s72_texture.src << " at index " << texture_index << std::endl;
 		}
+
+		std::cout << "Created " << textures.size() << " GPU textures (including default white)." << std::endl;
 	}
 
 	{ // make image views for each texture image
@@ -398,8 +390,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		VkSamplerCreateInfo create_info {
 			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 			.flags = 0,
-			.magFilter = VK_FILTER_NEAREST,
-			.minFilter = VK_FILTER_NEAREST, // When a texture is magnified or minified, use nearest-neighbor filtering (no interpolation, picks the closest texel). The alternative would be VK_FILTER_LINEAR for smoother blending.  
+			.magFilter = VK_FILTER_LINEAR, // Use linear filtering for magnification (smoother)
+			.minFilter = VK_FILTER_LINEAR, // Use linear filtering for minification (smoother)
 			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST, // When selecting between mipmap levels, snap to the nearest level rather than blending between two.
 			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
@@ -409,8 +401,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			.maxAnisotropy = VK_FALSE, // doesn't matter if anisotropy isn't enabled
 			.compareEnable = VK_FALSE, // Depth comparison is disabled (used for shadow mapping). So compareOp is ignored.
 			.compareOp = VK_COMPARE_OP_ALWAYS, // doesn't matter if compare isn't enabled
-			.minLod = 0.0f, 
-			.maxLod = 0.0f, // Clamps the mipmap level to exactly 0, meaning only the base mip level is ever used. 
+			.minLod = 0.0f,
+			.maxLod = 0.0f, // Clamps the mipmap level to exactly 0, meaning only the base mip level is ever used.
 			.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
 			.unnormalizedCoordinates = VK_FALSE, // Texture coordinates are in the standard [0, 1] range rather than pixel coordinates.
 		};
@@ -1192,10 +1184,37 @@ void Tutorial::update(float dt) {
 				tf.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * world;
 				tf.WORLD_FROM_LOCAL_NORMAL = transpose(inverse_affine(world));
 
+				// Determine texture index from material
+				uint32_t tex_index = 0; // default white texture
+				if (node->mesh->material != nullptr) {
+					// Check for albedo texture in material
+					S72::Material* mat = node->mesh->material;
+					S72::Texture* albedo_texture = nullptr;
+
+					// Try to get albedo texture from the material's BRDF
+					if (auto* pbr = std::get_if<S72::Material::PBR>(&mat->brdf)) {
+						if (auto* tex = std::get_if<S72::Texture*>(&pbr->albedo)) {
+							albedo_texture = *tex;
+						}
+					} else if (auto* lambertian = std::get_if<S72::Material::Lambertian>(&mat->brdf)) {
+						if (auto* tex = std::get_if<S72::Texture*>(&lambertian->albedo)) {
+							albedo_texture = *tex;
+						}
+					}
+
+					// Look up texture index
+					if (albedo_texture != nullptr) {
+						auto it = texture_index_map.find(albedo_texture);
+						if (it != texture_index_map.end()) {
+							tex_index = it->second;
+						}
+					}
+				}
+
 				object_instances.emplace_back(ObjectInstance{
 					.mesh = node->mesh,
 					.transform = tf,
-					.texture = 0,
+					.texture = tex_index,
 				});
 			}
 

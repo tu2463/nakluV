@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include "PosNorTexTanVertex.hpp"
+#include "stb_image.h"
 
 //functions that do the inverse of those in vk_enum_string_helper.h :
 
@@ -1054,4 +1055,43 @@ void S72::process_meshes() {
     }
 
     std::cout << "Total pooled vertices: " << vertices.size() << std::endl;
+}
+
+void S72::load_textures() {
+    for (auto &[key, texture] : textures) {
+        // Skip if already loaded
+        if (!texture.pixels.empty()) continue;
+
+        std::cout << "Loading texture: " << texture.path << std::endl;
+
+        // Load image using stb_image (always request RGBA = 4 channels)
+        int width, height, channels;
+        unsigned char* data = stbi_load(texture.path.c_str(), &width, &height, &channels, 4);
+
+        if (!data) {
+            std::cerr << "WARNING: Failed to load texture \"" << texture.path << "\": " << stbi_failure_reason() << std::endl;
+            // Create a 1x1 magenta placeholder texture to make missing textures obvious
+            texture.width = 1;
+            texture.height = 1;
+            texture.channels = 4;
+            texture.pixels = {255, 0, 255, 255}; // magenta
+            continue;
+        }
+
+        texture.width = width;
+        texture.height = height;
+        texture.channels = channels; // original channels (for debugging)
+
+        // Copy pixel data into vector (stb always gives us RGBA because we requested 4)
+        size_t pixel_count = width * height * 4;
+        texture.pixels.resize(pixel_count);
+        std::memcpy(texture.pixels.data(), data, pixel_count);
+
+        // Free stb_image allocated memory
+        stbi_image_free(data);
+
+        std::cout << "  Loaded: " << width << "x" << height << " (" << channels << " original channels)" << std::endl;
+    }
+
+    std::cout << "Loaded " << textures.size() << " textures." << std::endl;
 }

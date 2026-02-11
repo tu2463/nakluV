@@ -18,6 +18,7 @@ struct S72 {
 
     static S72 load(std::string const &file);
     void process_meshes(); // extract vertices from binary data into pooled buffer
+    void load_textures(); // load texture images from disk using stb_image
 
     // Pooled vertex data (populated by process_meshes):
     std::vector<PosNorTexTanVertex> vertices;
@@ -211,6 +212,12 @@ struct S72 {
 
 		//computed during loading:
 		std::string path; //path to data file, taking into account path to s72 file (relative to current working directory)
+
+		// Image data loaded from disk (populated by load_textures):
+		int width = 0;
+		int height = 0;
+		int channels = 0; // number of channels in the original image
+		std::vector<uint8_t> pixels; // RGBA pixels (always 4 channels after loading)
 	};
 	//we organize textures by src + type + format, so that two materials using to the same image *in the same way* end up referring to the same texture object:
     std::unordered_map< std::string, Texture > textures;
