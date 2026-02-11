@@ -71,7 +71,7 @@
 	"type":"CAMERA",
 	"name":"Camera-ClipFar",
 	"perspective":{
-		"aspect":1.5,
+		"aspect":0.67,
 		"vfov":0.5,
 		"near":0.05,
 		"far":1
@@ -89,7 +89,7 @@
 	"type":"CAMERA",
 	"name":"Camera-ClipShort",
 	"perspective":{
-		"aspect":1.5,
+		"aspect":0.75,
 		"vfov":0.5,
 		"near":100,
 		"far":150
