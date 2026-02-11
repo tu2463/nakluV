@@ -1364,6 +1364,49 @@ void Tutorial::update(float dt) {
 		push_edge(ntr, ftr, 0xff,0xff,0x00,0xff, 0xff,0xff,0x00,0xff);
 		push_edge(ntl, ftl, 0xff,0xff,0x00,0xff, 0xff,0xff,0x00,0xff);
 
+		// Draw bounding boxes for each object instance
+		for (ObjectInstance const &inst : object_instances) {
+			if (inst.mesh == nullptr) continue;
+
+			// Get local-space bounding box corners
+			S72::vec3 const &bmin = inst.mesh->bbox_min;
+			S72::vec3 const &bmax = inst.mesh->bbox_max;
+
+			// Helper to transform local point to world space
+			auto local_to_world = [&](float lx, float ly, float lz) -> Vec3 {
+				vec4 local = {lx, ly, lz, 1.0f};
+				vec4 world_pt = inst.transform.WORLD_FROM_LOCAL * local;
+				return Vec3{world_pt[0], world_pt[1], world_pt[2]};
+			};
+
+			// 8 corners of the bounding box in world space
+			Vec3 c000 = local_to_world(bmin.x, bmin.y, bmin.z);
+			Vec3 c001 = local_to_world(bmin.x, bmin.y, bmax.z);
+			Vec3 c010 = local_to_world(bmin.x, bmax.y, bmin.z);
+			Vec3 c011 = local_to_world(bmin.x, bmax.y, bmax.z);
+			Vec3 c100 = local_to_world(bmax.x, bmin.y, bmin.z);
+			Vec3 c101 = local_to_world(bmax.x, bmin.y, bmax.z);
+			Vec3 c110 = local_to_world(bmax.x, bmax.y, bmin.z);
+			Vec3 c111 = local_to_world(bmax.x, bmax.y, bmax.z);
+
+			// Draw 12 edges of the bounding box (cyan color)
+			// Bottom face (z = min)
+			push_edge(c000, c100, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c100, c110, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c110, c010, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c010, c000, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			// Top face (z = max)
+			push_edge(c001, c101, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c101, c111, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c111, c011, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c011, c001, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			// Vertical edges connecting bottom and top faces
+			push_edge(c000, c001, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c100, c101, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c110, c111, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+			push_edge(c010, c011, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
+		}
+
 	} else {
 		assert(0 && "only three camera modes");
 	}

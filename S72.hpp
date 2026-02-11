@@ -117,6 +117,10 @@ struct S72 {
 
         // Computed during process_meshes():
         uint32_t first_vertex = 0; // index into pooled vertices buffer
+
+        // Bounding box in local space (computed during process_meshes):
+        vec3 bbox_min = vec3{.x = 0.0f, .y = 0.0f, .z = 0.0f};
+        vec3 bbox_max = vec3{.x = 0.0f, .y = 0.0f, .z = 0.0f};
     };
     std::unordered_map< std::string, Mesh> meshes;
 

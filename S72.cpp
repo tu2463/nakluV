@@ -2,6 +2,8 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include <limits>
+#include <algorithm>
 #include "PosNorTexTanVertex.hpp"
 #include "stb_image.h"
 
@@ -1030,6 +1032,10 @@ void S72::process_meshes() {
         // Record where this mesh starts in the pooled vertex buffer
         mesh.first_vertex = static_cast<uint32_t>(vertices.size());
 
+        // Initialize bounding box with extreme values
+        mesh.bbox_min = vec3{.x = std::numeric_limits<float>::max(), .y = std::numeric_limits<float>::max(), .z = std::numeric_limits<float>::max()};
+        mesh.bbox_max = vec3{.x = -std::numeric_limits<float>::max(), .y = -std::numeric_limits<float>::max(), .z = -std::numeric_limits<float>::max()};
+
         for (uint32_t i = 0; i < mesh.count; ++i) {
             PosNorTexTanVertex vertex{};
 
@@ -1038,6 +1044,14 @@ void S72::process_meshes() {
 
                 if (attr_name == "POSITION") {
                     vertex.Position = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
+
+                    // Update bounding box
+                    mesh.bbox_min.x = std::min(mesh.bbox_min.x, vertex.Position.x);
+                    mesh.bbox_min.y = std::min(mesh.bbox_min.y, vertex.Position.y);
+                    mesh.bbox_min.z = std::min(mesh.bbox_min.z, vertex.Position.z);
+                    mesh.bbox_max.x = std::max(mesh.bbox_max.x, vertex.Position.x);
+                    mesh.bbox_max.y = std::max(mesh.bbox_max.y, vertex.Position.y);
+                    mesh.bbox_max.z = std::max(mesh.bbox_max.z, vertex.Position.z);
                 } else if (attr_name == "NORMAL") {
                     vertex.Normal = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
                 } else if (attr_name == "TEXCOORD") {
@@ -1047,11 +1061,13 @@ void S72::process_meshes() {
                 }
             }
 
-            vertices.push_back(vertex); // diff btw push_back and emplace_back //vv push_back copies or moves the object into the vector, while emplace_back constructs the object in place using the provided arguments; since vertex is already constructed, push_back is appropriate here
+            vertices.push_back(vertex);
         }
 
         std::cout << "Processed mesh: " << mesh_name
-                  << " (first=" << mesh.first_vertex << ", count=" << mesh.count << ")" << std::endl;
+                  << " (first=" << mesh.first_vertex << ", count=" << mesh.count
+                  << ", bbox=[" << mesh.bbox_min.x << "," << mesh.bbox_min.y << "," << mesh.bbox_min.z
+                  << "] to [" << mesh.bbox_max.x << "," << mesh.bbox_max.y << "," << mesh.bbox_max.z << "])" << std::endl;
     }
 
     std::cout << "Total pooled vertices: " << vertices.size() << std::endl;
