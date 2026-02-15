@@ -1032,7 +1032,7 @@ void S72::process_meshes() {
         // Record where this mesh starts in the pooled vertex buffer
         mesh.first_vertex = static_cast<uint32_t>(vertices.size());
 
-        // Initialize bounding box with extreme values
+        // Initialize bounding box with extreme values: set min to largest possible float, max to smallest possible float
         mesh.bbox_min = vec3{.x = std::numeric_limits<float>::max(), .y = std::numeric_limits<float>::max(), .z = std::numeric_limits<float>::max()};
         mesh.bbox_max = vec3{.x = -std::numeric_limits<float>::max(), .y = -std::numeric_limits<float>::max(), .z = -std::numeric_limits<float>::max()};
 
@@ -1045,7 +1045,7 @@ void S72::process_meshes() {
                 if (attr_name == "POSITION") {
                     vertex.Position = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
 
-                    // Update bounding box
+                    // Compute bounding box
                     mesh.bbox_min.x = std::min(mesh.bbox_min.x, vertex.Position.x);
                     mesh.bbox_min.y = std::min(mesh.bbox_min.y, vertex.Position.y);
                     mesh.bbox_min.z = std::min(mesh.bbox_min.z, vertex.Position.z);

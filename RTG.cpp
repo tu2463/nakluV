@@ -62,6 +62,13 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			if (camera_mode != "scene" && camera_mode != "user" && camera_mode != "debug") {
 				throw std::runtime_error("--camera must be 'user', 'scene', or 'debug'.");
 			}
+		} else if (arg == "--culling") {
+			if (argi + 1 >= argc) throw std::runtime_error("--culling requires a parameter (a culling mode).");
+			argi += 1;
+			culling_mode = argv[argi];
+			if (culling_mode != "none" && culling_mode != "frustum") {
+				throw std::runtime_error("--culling must be 'none' or 'frustum'.");
+			}
 		} else {
 			throw std::runtime_error("Unrecognized argument '" + arg + "'.");
 		}
