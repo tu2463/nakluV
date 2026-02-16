@@ -4,6 +4,10 @@
 // #include "refsol.hpp"
 
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include <array>
 #include <cassert>
@@ -1268,36 +1272,120 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	}
 }
 
-// evaluate driver's state at animation_time and write into driver.node.translation/rotation/scale
+// evaluate driver's state at animation_time and write into driver.node.translation/rotation/scale based on driver.values
 void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
-	if (driver.times.empty()) {
-		// no keyframes, do nothing
-		return;
-	}
+	if (driver.times.empty()) return;
 
 	// find keyframe interval
-	size_t i = 0;
-	if (time < driver.times[0]) {
+	if (time <= driver.times[0]) {
 		// before first keyframe, set to first keyframe value
-		// set the animated value to driver.values[0]
-		i = 0;
+		// set the animated value to driver.values start at 0
+		// The values in the values array are grouped into 1D-4D vectors depending on the channel type and interpolation scheme. 
+		// For example, a 3D channel with n times will have 3n values, which should be considered as n 3-vectors.
+		if (driver.channel == S72::Driver::Channel::translation) {
+			driver.node.translation = S72::vec3{
+				.x = driver.values[0],
+				.y = driver.values[1],
+				.z = driver.values[2]     
+			};
+		} else if (driver.channel == S72::Driver::Channel::rotation) {
+			driver.node.rotation = S72::quat{   
+				.x = driver.values[0],
+				.y = driver.values[1],
+				.z = driver.values[2],
+				.w = driver.values[3] 
+			}; 
+		} else if (driver.channel == S72::Driver::Channel::scale) {
+			driver.node.scale = S72::vec3{
+				.x = driver.values[0],
+				.y = driver.values[1],
+				.z = driver.values[2]  
+			};
+		}
 	} else if (time > driver.times.back()) {
 		// after last keyframe, set to last keyframe value
 		// set the animated value to driver.values.back()
-		i = driver.times.size() - 1;
+		size_t i = driver.values.size() - 4;
+		if (driver.channel == S72::Driver::Channel::translation) {
+			driver.node.translation = S72::vec3{
+				.x = driver.values[i + 1],
+				.y = driver.values[i + 2],
+				.z = driver.values[i + 3]     
+			};
+		} else if (driver.channel == S72::Driver::Channel::rotation) {
+			driver.node.rotation = S72::quat{   
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2],
+				.w = driver.values[i + 3] 
+			}; 
+		} else if (driver.channel == S72::Driver::Channel::scale) {
+			driver.node.scale = S72::vec3{
+				.x = driver.values[i + 1],
+				.y = driver.values[i + 2],
+				.z = driver.values[i + 3]   
+			};
+		}
 	} else {
 		// time is between keyframes, find the interval [times[i], times[i+1]] that contains animation_time
+		size_t i = 0;
 		while (i < driver.times.size() && driver.times[i] <= time) {
 			i++;
 		}
-	}
+		assert(0 < i && i < driver.times.size()); // because time > driver.times[0] and time < driver.times.back()
 
-	if (driver.interpolation == S72::Driver::Interpolation::STEP) {
-		// TODO: the output value in the middle of a time interval is the value at the beginning of that interval.
-	} else if (driver.interpolation == S72::Driver::Interpolation::LINEAR) {
-		// TODO: the output value in the middle of a time interval is a linear mix of the starting and ending values.
-	} else if (driver.interpolation == S72::Driver::Interpolation::SLERP) {
-		// TODO: the output value in the middle of a time interval is a "spherical linear interpolation" between the starting and ending values. (Doesn't make sense for 1D signals or non-normalized signals.)
+		if (driver.interpolation == S72::Driver::Interpolation::STEP) {
+			// the output value in the middle of a time interval is the value at the beginning of that interval.
+			size_t start_i = (i - 1) * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+			if (driver.channel == S72::Driver::Channel::translation) {
+				driver.node.translation = S72::vec3{
+					.x = driver.values[start_i + 0],
+					.y = driver.values[start_i + 1],
+					.z = driver.values[start_i + 2]     
+				};
+			} else if (driver.channel == S72::Driver::Channel::rotation) {
+				driver.node.rotation = S72::quat{   
+					.x = driver.values[start_i + 0],
+					.y = driver.values[start_i + 1],
+					.z = driver.values[start_i + 2],
+					.w = driver.values[start_i + 3] 
+				};
+			} else if (driver.channel == S72::Driver::Channel::scale) {
+				driver.node.scale = S72::vec3{
+					.x = driver.values[start_i + 0],
+					.y = driver.values[start_i + 1],
+					.z = driver.values[start_i + 2]   
+				};
+			}
+		} else if (driver.interpolation == S72::Driver::Interpolation::LINEAR) {
+			// the output value in the middle of a time interval is a linear mix of the starting and ending values.
+			float t = (time - driver.times[i-1]) / (driver.times[i] - driver.times[i-1]); // normalized time in [0, 1]
+			float start_i = (i - 1) * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+			float end_i = i * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+			if (driver.channel == S72::Driver::Channel::translation) {
+				driver.node.translation = S72::vec3{
+					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
+					.y = (1.0f - t) * driver.values[start_i + 1] + t * driver.values[end_i + 1],
+					.z = (1.0f - t) * driver.values[start_i + 2] + t * driver.values[end_i + 2],    
+				};
+			} else if (driver.channel == S72::Driver::Channel::rotation) {
+				driver.node.rotation = S72::quat{   
+					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
+					.y = (1.0f - t) * driver.values[start_i + 1] + t * driver.values[end_i + 1],
+					.z = (1.0f - t) * driver.values[start_i + 2] + t * driver.values[end_i + 2],
+					.w = (1.0f - t) * driver.values[start_i + 3] + t * driver.values[end_i + 3], 
+				}; // TODO: check - would this linear mix work for rotation?
+			} else if (driver.channel == S72::Driver::Channel::scale) {
+				driver.node.scale = S72::vec3{
+					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
+					.y = (1.0f - t) * driver.values[start_i + 1] + t * driver.values[end_i + 1],
+					.z = (1.0f - t) * driver.values[start_i + 2] + t * driver.values[end_i + 2],   
+				};
+			}
+		} else if (driver.interpolation == S72::Driver::Interpolation::SLERP) {
+			// TODO: the output value in the middle of a time interval is a "spherical linear interpolation" between the starting and ending values. 
+			// (Doesn't make sense for 1D signals or non-normalized signals.)
+		}
 	}
 }
 
