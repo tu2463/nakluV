@@ -26,7 +26,7 @@ body {
 
 h1 { font-size: 20px; font-weight: 700; }
 h2 { font-size: 16px; font-weight: 700; }
-h3 { font-size: 16px; font-weight: 400; }
+h3 { font-size: 16px; font-weight: 400; margin-top: 30px;}
 h4 { font-size: 14px; font-weight: 400; }
 
 h1, h2, h3, h4 {
@@ -34,7 +34,7 @@ h1, h2, h3, h4 {
 }
 
 p {
-	margin: 5px 0 0 0;
+	margin: 10px 0 0 0;
 }
 
 .subtitle {
@@ -46,6 +46,7 @@ p {
 .placeholder {
 	color:#800;
 	font-style:italic;
+	margin-top: 20px;
 }
 
 .answer {
@@ -312,6 +313,23 @@ how you computed bounding boxes and the camera frustum;
 and the approach you used in your box-frustum test (draw and include a picture if it makes your explanation easier).
 Include references to specific functions and structures in your code for us to examine further.
 </p>
+
+<p class="answer">
+Bounding boxes (AABBs) are computed per-mesh in S72::process_meshes(). For each mesh, bbox_min and bbox_max (stored in S72::Mesh) are updated by iterating through all vertex positions to find the min/max along each axis.
+</p>
+
+<p class="answer">
+The camera frustum is stored in Tutorial::CullingFrustum (adapted from More (Robust) Frustum Culling by Bruno Opsenica), containing near_right, near_top, near_plane, and far_plane. These are computed in Tutorial::update() using the camera's projection attributes. A CAMERA_FROM_WORLD matrix is computed during `update` and stored in the Tutorial struct.
+</p>
+
+<p class="answer">
+The visibility test is implemented in SAT_visibility_test() (also adapted from More (Robust) Frustum Culling by Bruno Opsenica) using the Separating Axis Theorem. During the visibility testing, the mesh's local-space AABB is transformed to camera space (view space) using CAMERA_FROM_WORLD, becoming an oriented bounding box (OBB). The algorithm tests 26 potential separating axes: the frustum's Z-axis (near/far planes), 4 frustum side plane normals, and cross products of 6 frustum edges with 3 OBB axes. For each axis, OBB and frustum intervals are projected and compared if any axis shows non-overlapping intervals, the box is culled.
+</p>
+
+<p class="answer">
+In Tutorial::render(), when culling_mode == CullingMode::Frustum, each ObjectInstance is tested. Instances that fail the test will be skipped for drawing.
+</p>
+
 <p class="placeholder">
 Include, as evidence, a screenshot or video showing that culling is working (e.g., by using a debug camera to show that meshes outside the user camera's view aren't being drawn).
 </p>
