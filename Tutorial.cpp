@@ -1282,24 +1282,25 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 		// set the animated value to driver.values start at 0
 		// The values in the values array are grouped into 1D-4D vectors depending on the channel type and interpolation scheme. 
 		// For example, a 3D channel with n times will have 3n values, which should be considered as n 3-vectors.
+		size_t i = 0;
 		if (driver.channel == S72::Driver::Channel::translation) {
 			driver.node.translation = S72::vec3{
-				.x = driver.values[0],
-				.y = driver.values[1],
-				.z = driver.values[2]     
+				.x = driver.values[i + 1],
+				.y = driver.values[i + 2],
+				.z = driver.values[i + 3]     
 			};
 		} else if (driver.channel == S72::Driver::Channel::rotation) {
 			driver.node.rotation = S72::quat{   
-				.x = driver.values[0],
-				.y = driver.values[1],
-				.z = driver.values[2],
-				.w = driver.values[3] 
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2],
+				.w = driver.values[i + 3] 
 			}; 
 		} else if (driver.channel == S72::Driver::Channel::scale) {
 			driver.node.scale = S72::vec3{
-				.x = driver.values[0],
-				.y = driver.values[1],
-				.z = driver.values[2]  
+				.x = driver.values[i + 1],
+				.y = driver.values[i + 2],
+				.z = driver.values[i + 3]   
 			};
 		}
 	} else if (time > driver.times.back()) {
@@ -1359,9 +1360,10 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 			}
 		} else if (driver.interpolation == S72::Driver::Interpolation::LINEAR) {
 			// the output value in the middle of a time interval is a linear mix of the starting and ending values.
+			size_t start_i = (i - 1) * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+			size_t end_i = i * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+
 			float t = (time - driver.times[i-1]) / (driver.times[i] - driver.times[i-1]); // normalized time in [0, 1]
-			float start_i = (i - 1) * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
-			float end_i = i * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
 			if (driver.channel == S72::Driver::Channel::translation) {
 				driver.node.translation = S72::vec3{
 					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
@@ -1385,6 +1387,33 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 		} else if (driver.interpolation == S72::Driver::Interpolation::SLERP) {
 			// TODO: the output value in the middle of a time interval is a "spherical linear interpolation" between the starting and ending values. 
 			// (Doesn't make sense for 1D signals or non-normalized signals.)
+			size_t start_i = (i - 1) * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+			size_t end_i = i * (driver.channel == S72::Driver::Channel::rotation ? 4 : 3);
+
+			float t = (time - driver.times[i-1]) / (driver.times[i] - driver.times[i-1]); // normalized time in [0, 1]
+			if (driver.channel == S72::Driver::Channel::translation) {
+				driver.node.translation = S72::vec3{
+					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
+					.y = (1.0f - t) * driver.values[start_i + 1] + t * driver.values[end_i + 1],
+					.z = (1.0f - t) * driver.values[start_i + 2] + t * driver.values[end_i + 2],    
+				};
+			} else if (driver.channel == S72::Driver::Channel::rotation) {
+				glm::quat q_start{ driver.values[start_i + 0], driver.values[start_i + 1], driver.values[start_i + 2], driver.values[start_i + 3] };
+				glm::quat q_end{ driver.values[end_i + 0], driver.values[end_i + 1], driver.values[end_i + 2], driver.values[end_i + 3] };
+				glm::quat q_interp = glm::slerp(q_start, q_end, t);
+				driver.node.rotation = S72::quat{   
+					.x = q_interp.x,
+					.y = q_interp.y,
+					.z = q_interp.z,
+					.w = q_interp.w, 
+				};
+			} else if (driver.channel == S72::Driver::Channel::scale) {
+				driver.node.scale = S72::vec3{
+					.x = (1.0f - t) * driver.values[start_i + 0] + t * driver.values[end_i + 0],
+					.y = (1.0f - t) * driver.values[start_i + 1] + t * driver.values[end_i + 1],
+					.z = (1.0f - t) * driver.values[start_i + 2] + t * driver.values[end_i + 2],   
+				};
+			}
 		}
 	}
 }
