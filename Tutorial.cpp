@@ -1125,7 +1125,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdDraw(workspace.command_buffer, 3, 1, 0, 0);
 	}
 
-	{ // draw with the lines pipeline:
+	if (!lines_vertices.empty()) { // draw with the lines pipeline:
 		vkCmdBindPipeline(
 			workspace.command_buffer, 
 			VK_PIPELINE_BIND_POINT_GRAPHICS, 
@@ -1774,54 +1774,54 @@ void Tutorial::update(float dt) {
 		world.SUN_ENERGY.b = 0.9f;
 	}
 
-	{ // 4 triangular pyramids (wireframe tetrahedra) using your vec3; rotation stays whatever you already do in your transform
-		// lines_vertices.clear();
+	// { // 4 triangular pyramids (wireframe tetrahedra) using your vec3; rotation stays whatever you already do in your transform
+	// 	// lines_vertices.clear();
 
-		constexpr uint32_t pyramids = 4;
-		constexpr size_t edges_per_pyramid = 6;
-		constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
-		lines_vertices.reserve(count);
+	// 	constexpr uint32_t pyramids = 4;
+	// 	constexpr size_t edges_per_pyramid = 6;
+	// 	constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
+	// 	lines_vertices.reserve(count);
 
-		auto push_tetra = [&](vec3 center, float s,
-							// color per vertex (apex, base1, base2, base3)
-							uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
-							uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
-							uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
-							uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
+	// 	auto push_tetra = [&](vec3 center, float s,
+	// 						// color per vertex (apex, base1, base2, base3)
+	// 						uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
+	// 						uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
+	// 						uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
+	// 						uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
 
-			// Local tetra vertices (triangular pyramid), then translate by center:
-			vec3 A = center + vec3{ 0.0f,  0.75f,  0.0f} * s; // apex
-			vec3 B = center + vec3{-0.65f, -0.375f, -0.45f} * s; // base v1
-			vec3 C = center + vec3{ 0.65f, -0.375f, -0.45f} * s; // base v2
-			vec3 D = center + vec3{ 0.0f, -0.375f,  0.75f} * s; // base v3
+	// 		// Local tetra vertices (triangular pyramid), then translate by center:
+	// 		vec3 A = center + vec3{ 0.0f,  0.75f,  0.0f} * s; // apex
+	// 		vec3 B = center + vec3{-0.65f, -0.375f, -0.45f} * s; // base v1
+	// 		vec3 C = center + vec3{ 0.65f, -0.375f, -0.45f} * s; // base v2
+	// 		vec3 D = center + vec3{ 0.0f, -0.375f,  0.75f} * s; // base v3
 
-			// 6 edges:
-			push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
-			push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
-			push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
+	// 		// 6 edges:
+	// 		push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
+	// 		push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
+	// 		push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
 
-			push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
-			push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
-			push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
-		};
+	// 		push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
+	// 		push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
+	// 		push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
+	// 	};
 
-		const float s = 0.35f; // pyramid size
+	// 	const float s = 0.35f; // pyramid size
 
-		// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
-		push_tetra(vec3{-0.45f,  0.35f, 0.25f}, s,
-				0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
+	// 	// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
+	// 	push_tetra(vec3{-0.45f,  0.35f, 0.25f}, s,
+	// 			0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
 
-		push_tetra(vec3{ 0.45f,  0.35f, 0.55f}, s,
-				0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
+	// 	push_tetra(vec3{ 0.45f,  0.35f, 0.55f}, s,
+	// 			0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
 
-		push_tetra(vec3{-0.45f, -0.35f, 0.45f}, s,
-				0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
+	// 	push_tetra(vec3{-0.45f, -0.35f, 0.45f}, s,
+	// 			0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
 
-		push_tetra(vec3{ 0.45f, -0.35f, 0.15f}, s,
-				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
+	// 	push_tetra(vec3{ 0.45f, -0.35f, 0.15f}, s,
+	// 			0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
 
-		// assert(lines_vertices.size() == count);
-	}
+	// 	// assert(lines_vertices.size() == count);
+	// }
 }
 
 
