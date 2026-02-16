@@ -13,6 +13,19 @@ static_assert(sizeof(mat4) == 16 * 4, "mat4 is exactly 16 32-bit floats");
 using vec4 = std::array< float, 4 >;
 static_assert(sizeof(vec4) == 4 * 4, "vec4 is exactly 4 32-bit floats");
 
+// TODO: move these into a separate header
+using vec3 = std::array< float, 3 >;
+static_assert(sizeof(vec3) == 3 * 4, "vec3 is exactly 3 32-bit floats");
+
+inline vec3 operator+(vec3 a, vec3 b) { return vec3{a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
+inline vec3 operator-(vec3 a, vec3 b) { return vec3{a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
+inline vec3 operator*(vec3 a, float s) { return vec3{a[0] * s, a[1] * s, a[2] * s}; }
+inline vec3 operator*(float s, vec3 a) { return vec3{a[0] * s, a[1] * s, a[2] * s}; }
+inline vec3 operator/(vec3 a, float s) { return vec3{a[0] / s, a[1] / s, a[2] / s}; }
+inline vec3& operator*=(vec3& a, float s) { a[0] *= s; a[1] *= s; a[2] *= s; return a; }
+inline float length(vec3 v) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+inline float dot(vec3 a, vec3 b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
 inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean //vv what does the syntax "operator*" mean //??
     vec4 ret;
     // compute ret = A * b
@@ -23,6 +36,12 @@ inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean
         }
     }
     return ret;
+}
+
+inline vec3 operator*(mat4 const &A, vec3 const &v) {
+    vec4 v4 = {v[0], v[1], v[2], 1.0f};
+    vec4 result = A * v4;
+    return {result[0], result[1], result[2]};
 }
 
 inline mat4 operator*(mat4 const &A, mat4 const &B) {
@@ -116,7 +135,7 @@ inline mat4 look_at(
 	};
 }
 
-//orbit camera matrix: understand this //??
+//orbit camera matrix: //??
 // makes a camera-from-world matrix for a camera orbiting target_{x,y,z}
 //   at distance radius with angles azimuth and elevation.
 // azimuth is counterclockwise angle in the xy plane from the x axis

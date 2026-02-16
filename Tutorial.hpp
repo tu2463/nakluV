@@ -3,7 +3,6 @@
 #include "PosColVertex.hpp"
 #include "PosNorTexVertex.hpp"
 #include "mat4.hpp"
-#include "vec3.hpp"
 
 #include "RTG.hpp"
 #include "S72.hpp"
@@ -176,6 +175,28 @@ struct Tutorial : RTG::Application {
 
 	float time = 0.0f;
 
+	// -- camera & culling --
+	enum class CullingMode {
+		None = 0,
+		Frustum = 1,
+	} culling_mode = CullingMode::None; 
+
+	// Credit: adapted from More (Robust) Frustum Culling by Bruno Opsenica
+	struct CullingFrustum {
+		float near_right;
+		float near_top;
+		float near_plane;
+		float far_plane;
+	} frustum;
+
+	// Credit: adapted from More (Robust) Frustum Culling by Bruno Opsenica
+	struct OBB {
+		vec3 center = {};
+		vec3 extents = {};
+		// Orthonormal basis
+		vec3 axes[3] = {};
+	};
+
 	//for selecting between cameras:
 	enum class CameraMode {
 		Scene = 0,
@@ -191,22 +212,23 @@ struct Tutorial : RTG::Application {
 	uint8_t active_scene_camera = 0; // index into scene_camera_instances of the currently active camera, used when camera_mode == CameraMode::Scene
 
 	struct OrbitCamera {
-		float target_x = 0.0f, target_y = 0.0f, target_z = 0.0f; //where the camera is looking + orbiting
-		float radius = 2.0f; //distance from camera to target
-		float azimuth = 0.0f; //counterclockwise angle around z axis between x axis and camera direction (radians)
-		float elevation = 0.25f * float(M_PI); //angle up from xy plane to camera direction (radians)
+		float target_x = 0.0f, target_y = 0.0f, target_z = 0.0f; // where the camera is looking + orbiting
+		float radius = 2.0f; // distance from camera to target
+		float azimuth = 0.0f; // counterclockwise angle around z axis between x axis and camera direction (radians)
+		float elevation = 0.25f * float(M_PI); // angle up from xy plane to camera direction (radians) //??
 
-		float fov = 60.0f / 180.0f * float(M_PI); //vertical field of view (radians)
-		float near = 0.1f; //near clipping plane
-		float far = 1000.0f; //far clipping plane
+		float fov = 60.0f / 180.0f * float(M_PI); // vertical field of view (radians) //??
+		float near = 0.1f; // near clipping plane
+		float far = 1000.0f; // far clipping plane
 	} free_camera;
 
 	OrbitCamera debug_camera; // TODO: increase usefulness by etting the debug camera to a position that can see the whole scene
 	// std::variant< SceneCamera, OrbitCamera > culling_camera = free_camera; // previously active camera // FIXED-BUG: can't save a pointer to 2 types, so save the prev mode and mode and CLIP_FROM_WORLD to compute fructum
-  	mat4 CLIP_FROM_WORLD_CULLING;  // the culling frustum matrix  
-	
+  	
 	//computed from the current camera (as set by camera_mode) during update():
 	mat4 CLIP_FROM_WORLD;
+	mat4 CLIP_FROM_WORLD_CULLING;  // the culling frustum matrix  
+  	mat4 CAMERA_FROM_WORLD; // for transforming object positions into camera space for culling
 
 	std::vector< LinesPipeline::Vertex > lines_vertices;
 

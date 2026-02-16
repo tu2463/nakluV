@@ -30,6 +30,16 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
+	{ // set culling mode based on input
+		if (rtg.configuration.culling_mode == "none") {
+			culling_mode = CullingMode::None;
+		} else if (rtg.configuration.culling_mode == "frustum") {
+			culling_mode = CullingMode::Frustum;
+		} else {
+			throw std::runtime_error("Invalid culling mode '" + rtg.configuration.culling_mode + "'.");
+		}
+	}
+
 	// select a depth format:
 	// at least one of these two must be supported, according to the spec; but neither are required
 	depth_format = rtg.helpers.find_image_format(
@@ -715,6 +725,115 @@ void Tutorial::destroy_framebuffers() {
 }
 
 
+// Credit: adapted from More (Robust) Frustum Culling by Bruno Opsenica
+static bool SAT_visibility_test(const Tutorial::CullingFrustum& frustum, const mat4& VIEW_FROM_LOCAL, const S72::vec3& bmin, const S72::vec3& bmax)
+{
+    // Near, far
+    float z_near = frustum.near_plane;
+    float z_far = frustum.far_plane;
+    // half width, half height
+    float x_near = frustum.near_right;
+    float y_near = frustum.near_top;
+
+    // Consider four adjacent corners of the bounding box
+	vec3 corners[] = {
+		{bmin.x, bmin.y, bmin.z},
+		{bmax.x, bmin.y, bmin.z},
+		{bmin.x, bmax.y, bmin.z},
+		{bmin.x, bmin.y, bmax.z},
+	};
+
+	// Transform corners
+    // Note: I think this approach is only sufficient if our transform is non-shearing (affine)
+    for (size_t corner_idx = 0; corner_idx < 4; corner_idx++) {
+        corners[corner_idx] = VIEW_FROM_LOCAL * corners[corner_idx]; // transfer to camera space (view space)
+    }
+
+	// Compute the 3 edge vectors (axes)
+    // Use transformed corners to calculate center, axes and extents
+    Tutorial::OBB obb = {
+        .axes = {
+            corners[1] - corners[0], // edge along x-axis of the box
+            corners[2] - corners[0], // edge along y-axis of the box
+            corners[3] - corners[0] // edge along z-axis of the box
+        },
+    };
+    obb.center = corners[0] + 0.5f * (obb.axes[0] + obb.axes[1] + obb.axes[2]); // center of the box is the first corner plus half of the sum of the edge vectors
+    obb.extents = vec3{ length(obb.axes[0]), length(obb.axes[1]), length(obb.axes[2]) };
+    obb.axes[0] = obb.axes[0] / obb.extents[0]; // normalize length = 1, so the axes represent direction only; the extents represent the length along that direction
+    obb.axes[1] = obb.axes[1] / obb.extents[1];
+    obb.axes[2] = obb.axes[2] / obb.extents[2];
+    obb.extents *= 0.5f;
+
+	// start testing for each of the 26 separating axes
+	{	
+		// "M" is the separating axis (a unit vector) being tested
+		vec3 M = { 0.0f, 0.0f, 1.0f }; // the axis along which we're projecting the OBB; the +z of camera space (note that the frustum is looking down -z)
+		[[maybe_unused]] float MoX = 0.0f; // | m . x | (abs of M dot x-axis of the box, i.e. how much the box extends along the M axis on its x-axis; projection of the box's x-axis onto M)
+		[[maybe_unused]] float MoY = 0.0f; // | m . y |
+		[[maybe_unused]] float MoZ = M[2]; // m . z (not abs!)
+
+		// Projected center of our OBB
+		float MoC = obb.center[2]; // M dot center; Since M is (0, 0, 1), the projection of the center onto M is just the z component of the center in camera space
+		// Projected size of OBB
+		float radius = 0.0f;
+		for (size_t i = 0; i < 3; i++) { // loop through the three axes of the box
+			// dot(M, axes[i]) == axes[i].z;
+			// computes the half-width of the OBB's projection onto the Z-axis.
+			radius += fabsf(obb.axes[i][2]) * obb.extents[i]; // radius += |axis_i * M| * extent_i; (extent_i is the half-length along that axis, and |axis_i * M| is how much that axis contributes to the projection onto M. Use abs value because projection might be negative if the axis is pointed away from M)
+		}
+		float obb_min = MoC - radius;
+		float obb_max = MoC + radius;
+		// We can skip calculating the projection here, it's known
+		float m0 = z_far; // Since the frustum's direction is negative z, far is smaller than near
+		float m1 = z_near;
+
+		if (obb_min > m1 || obb_max < m0) {
+			return false;
+		}
+	}
+
+	{ // Frustum normals
+		const vec3 M[] = { // normals//??
+			{ 0.0, -z_near, y_near }, // Top plane
+			{ 0.0, z_near, y_near }, // Bottom plane
+			{ -z_near, 0.0f, x_near }, // Right plane
+			{ z_near, 0.0f, x_near }, // Left Plane
+		};
+		for (size_t m = 0; m < 4; m++) { // loop through the 4 frustum normals
+			float MoX = fabsf(M[m][0]);
+			float MoY = fabsf(M[m][1]);
+			float MoZ = M[m][2];
+			float MoC = dot(M[m], obb.center); // projection of the box center onto the normal
+
+			float obb_radius = 0.0f;
+			for (size_t i = 0; i < 3; i++) {
+				obb_radius += fabsf(dot(M[m], obb.axes[i])) * obb.extents[i];
+			}
+			float obb_min = MoC - obb_radius;
+			float obb_max = MoC + obb_radius;
+
+			// compute the frustum interval along this axis //??
+			float p = x_near * MoX + y_near * MoY;
+
+			float tau_0 = z_near * MoZ - p;
+			float tau_1 = z_near * MoZ + p;
+
+			if (tau_0 < 0.0f) {
+				tau_0 *= z_far / z_near;
+			}
+			if (tau_1 > 0.0f) {
+				tau_1 *= z_far / z_near;
+			}
+
+			if (obb_min > tau_1 || obb_max < tau_0) {
+				return false;
+			}
+		}
+	}
+	return
+}
+
 void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	//assert that parameters are valid:
 	assert(&rtg == &rtg_);
@@ -1077,6 +1196,22 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
+			if (culling_mode == CullingMode::Frustum){
+				// Get local-space bounding box corners
+				S72::vec3 const &bmin = inst.mesh->bbox_min;
+				S72::vec3 const &bmax = inst.mesh->bbox_max;
+
+				/* takes in:
+				1. the view matrix of the camera; Transforms points from world space into camera (view) space.
+				2. the model/world transform of object; Converts points from model space into world space.
+				*/
+        		mat4 VIEW_FROM_LOCAL = CAMERA_FROM_WORLD * inst.transform.WORLD_FROM_LOCAL;
+
+				if (!SAT_visibility_test(frustum, VIEW_FROM_LOCAL, bmin, bmax)) {
+					continue; // skip this instance if it's not visible
+				}
+			}
+
 			uint32_t index = uint32_t(&inst - &object_instances[0]);
 
 			// bind texture descriptor set
@@ -1136,15 +1271,15 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
 
-	auto push_edge = [&](Vec3 a, Vec3 b,
+	auto push_edge = [&](vec3 a, vec3 b,
 						 uint8_t ar, uint8_t ag, uint8_t ab, uint8_t aa,
 						 uint8_t br, uint8_t bg, uint8_t bb, uint8_t ba) {
 		lines_vertices.emplace_back(PosColVertex{
-			.Position{.x = a.x, .y = a.y, .z = a.z},
+			.Position{.x = a[0], .y = a[1], .z = a[2]},
 			.Color{.r = ar, .g = ag, .b = ab, .a = aa},
 		});
 		lines_vertices.emplace_back(PosColVertex{
-			.Position{.x = b.x, .y = b.y, .z = b.z},
+			.Position{.x = b[0], .y = b[1], .z = b[2]},
 			.Color{.r = br, .g = bg, .b = bb, .a = ba},
 		});
 	};
@@ -1302,30 +1437,11 @@ void Tutorial::update(float dt) {
 		for (S72::Node* root : s72.scene.roots) {
 			if (root) traverse(root, mat4_identity);
 		}
-		
-		// { // previous: sphere at center
-		// 	mat4 WORLD_FROM_LOCAL{ // sphere at origin
-		// 		1.0f, 0.0f, 0.0f, 0.0f,
-		// 		0.0f, 1.0f, 0.0f, 0.0f,
-		// 		0.0f, 0.0f, 1.0f, 0.0f,
-		// 		0.0f, 0.0f, 0.0f, 1.0f,
-		// 	};
-
-		// 	object_instances.emplace_back(ObjectInstance{
-		// 		.vertices = sphere_vertices, // TODO: understand this
-		// 		.transform{
-		// 			.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * WORLD_FROM_LOCAL,
-		// 			.WORLD_FROM_LOCAL = WORLD_FROM_LOCAL,
-		// 			.WORLD_FROM_LOCAL_NORMAL = WORLD_FROM_LOCAL,
-		// 		},
-		// 		.texture = 0,
-		// 	});
-		// }
 	}
 
 	lines_vertices.clear();
 	if (camera_mode == CameraMode::Scene) {
-		//TODO: what do we need here? the rendering happens through one of the cameras in the scene graph and the user cannot change the camera transformation
+		// the rendering happens through one of the cameras in the scene graph and the user cannot change the camera transformation
 		if (scene_camera_instances.empty()) {
 			camera_mode = CameraMode::User; // switch to user camera if no cameras in scene
 		} else {
@@ -1343,18 +1459,40 @@ void Tutorial::update(float dt) {
 				camera.WORLD_FROM_LOCAL
 			);
 
+			float tan_fov = tan(projection.vfov * 0.5f); //??
+			frustum = {
+				.near_right = projection.aspect * projection.near * tan_fov,
+				.near_top = projection.near * tan_fov,
+				.near_plane = -projection.near,
+				.far_plane = -projection.far,
+			};
+
+			// p_world = WORLD_FROM_LOCAL * p_camera
+			// p_camera = CAMERA_FROM_WORLD * p_world
+			CAMERA_FROM_WORLD = inverse(camera.WORLD_FROM_LOCAL);
 			CLIP_FROM_WORLD_CULLING = CLIP_FROM_WORLD;
 		}
-	} else if (camera_mode == CameraMode::User) { // understand this //??
-		CLIP_FROM_WORLD = perspective(
-			free_camera.fov,
-			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
-			free_camera.near,
-			free_camera.far
-		) * orbit(
+	} else if (camera_mode == CameraMode::User) { //??
+		CAMERA_FROM_WORLD = orbit(
 			free_camera.target_x, free_camera.target_y, free_camera.target_z,
 			free_camera.azimuth, free_camera.elevation, free_camera.radius
 		);
+
+		float aspect = rtg.swapchain_extent.width / float(rtg.swapchain_extent.height);
+		CLIP_FROM_WORLD = perspective(
+			free_camera.fov,
+			aspect,
+			free_camera.near,
+			free_camera.far
+		) * CAMERA_FROM_WORLD;
+
+		float tan_fov = tan(free_camera.fov * 0.5f);
+		frustum = {
+			.near_right = aspect * free_camera.near * tan_fov,
+			.near_top = free_camera.near * tan_fov,
+			.near_plane = -free_camera.near,
+			.far_plane = -free_camera.far,
+		};
 
 		CLIP_FROM_WORLD_CULLING = CLIP_FROM_WORLD;
 	} else if (camera_mode == CameraMode::Debug) {
@@ -1374,21 +1512,21 @@ void Tutorial::update(float dt) {
 		mat4 WORLD_FROM_CLIP = inverse(CLIP_FROM_WORLD_CULLING);
 
 		// Helper: transform clip-space point to world-space
-		auto clip_to_world = [&](float cx, float cy, float cz) -> Vec3 {
+		auto clip_to_world = [&](float cx, float cy, float cz) -> vec3 {
 			vec4 clip = {cx, cy, cz, 1.0f};
 			vec4 world = WORLD_FROM_CLIP * clip;
-			return Vec3{world[0]/world[3], world[1]/world[3], world[2]/world[3]}; // perspective divide
+			return vec3{world[0]/world[3], world[1]/world[3], world[2]/world[3]}; // perspective divide
 		};
 
 		// 8 corners in clip space (Vulkan: z from 0 to 1)
-		Vec3 nbl = clip_to_world(-1, -1, 0); // near bottom-left
-		Vec3 nbr = clip_to_world(+1, -1, 0); // near bottom-right
-		Vec3 ntr = clip_to_world(+1, +1, 0); // near top-right
-		Vec3 ntl = clip_to_world(-1, +1, 0); // near top-left
-		Vec3 fbl = clip_to_world(-1, -1, 1); // far bottom-left
-		Vec3 fbr = clip_to_world(+1, -1, 1); // far bottom-right
-		Vec3 ftr = clip_to_world(+1, +1, 1); // far top-right
-		Vec3 ftl = clip_to_world(-1, +1, 1); // far top-left
+		vec3 nbl = clip_to_world(-1, -1, 0); // near bottom-left
+		vec3 nbr = clip_to_world(+1, -1, 0); // near bottom-right
+		vec3 ntr = clip_to_world(+1, +1, 0); // near top-right
+		vec3 ntl = clip_to_world(-1, +1, 0); // near top-left
+		vec3 fbl = clip_to_world(-1, -1, 1); // far bottom-left
+		vec3 fbr = clip_to_world(+1, -1, 1); // far bottom-right
+		vec3 ftr = clip_to_world(+1, +1, 1); // far top-right
+		vec3 ftl = clip_to_world(-1, +1, 1); // far top-left
 
 		// Near plane (4 edges)
 		push_edge(nbl, nbr, 0xff,0xff,0x00,0xff, 0xff,0xff,0x00,0xff);
@@ -1415,21 +1553,21 @@ void Tutorial::update(float dt) {
 			S72::vec3 const &bmax = inst.mesh->bbox_max;
 
 			// Helper to transform local point to world space
-			auto local_to_world = [&](float lx, float ly, float lz) -> Vec3 {
+			auto local_to_world = [&](float lx, float ly, float lz) -> vec3 {
 				vec4 local = {lx, ly, lz, 1.0f};
 				vec4 world_pt = inst.transform.WORLD_FROM_LOCAL * local;
-				return Vec3{world_pt[0], world_pt[1], world_pt[2]};
+				return vec3{world_pt[0], world_pt[1], world_pt[2]};
 			};
 
 			// 8 corners of the bounding box in world space
-			Vec3 c000 = local_to_world(bmin.x, bmin.y, bmin.z);
-			Vec3 c001 = local_to_world(bmin.x, bmin.y, bmax.z);
-			Vec3 c010 = local_to_world(bmin.x, bmax.y, bmin.z);
-			Vec3 c011 = local_to_world(bmin.x, bmax.y, bmax.z);
-			Vec3 c100 = local_to_world(bmax.x, bmin.y, bmin.z);
-			Vec3 c101 = local_to_world(bmax.x, bmin.y, bmax.z);
-			Vec3 c110 = local_to_world(bmax.x, bmax.y, bmin.z);
-			Vec3 c111 = local_to_world(bmax.x, bmax.y, bmax.z);
+			vec3 c000 = local_to_world(bmin.x, bmin.y, bmin.z);
+			vec3 c001 = local_to_world(bmin.x, bmin.y, bmax.z);
+			vec3 c010 = local_to_world(bmin.x, bmax.y, bmin.z);
+			vec3 c011 = local_to_world(bmin.x, bmax.y, bmax.z);
+			vec3 c100 = local_to_world(bmax.x, bmin.y, bmin.z);
+			vec3 c101 = local_to_world(bmax.x, bmin.y, bmax.z);
+			vec3 c110 = local_to_world(bmax.x, bmax.y, bmin.z);
+			vec3 c111 = local_to_world(bmax.x, bmax.y, bmax.z);
 
 			// Draw 12 edges of the bounding box (cyan color)
 			// Bottom face (z = min)
@@ -1475,7 +1613,7 @@ void Tutorial::update(float dt) {
 		world.SUN_ENERGY.b = 0.9f;
 	}
 
-	{ // 4 triangular pyramids (wireframe tetrahedra) using your Vec3; rotation stays whatever you already do in your transform
+	{ // 4 triangular pyramids (wireframe tetrahedra) using your vec3; rotation stays whatever you already do in your transform
 		// lines_vertices.clear();
 
 		constexpr uint32_t pyramids = 4;
@@ -1483,7 +1621,7 @@ void Tutorial::update(float dt) {
 		constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
 		lines_vertices.reserve(count);
 
-		auto push_tetra = [&](Vec3 center, float s,
+		auto push_tetra = [&](vec3 center, float s,
 							// color per vertex (apex, base1, base2, base3)
 							uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
 							uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
@@ -1491,10 +1629,10 @@ void Tutorial::update(float dt) {
 							uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
 
 			// Local tetra vertices (triangular pyramid), then translate by center:
-			Vec3 A = center + Vec3{ 0.0f,  0.75f,  0.0f} * s; // apex
-			Vec3 B = center + Vec3{-0.65f, -0.375f, -0.45f} * s; // base v1
-			Vec3 C = center + Vec3{ 0.65f, -0.375f, -0.45f} * s; // base v2
-			Vec3 D = center + Vec3{ 0.0f, -0.375f,  0.75f} * s; // base v3
+			vec3 A = center + vec3{ 0.0f,  0.75f,  0.0f} * s; // apex
+			vec3 B = center + vec3{-0.65f, -0.375f, -0.45f} * s; // base v1
+			vec3 C = center + vec3{ 0.65f, -0.375f, -0.45f} * s; // base v2
+			vec3 D = center + vec3{ 0.0f, -0.375f,  0.75f} * s; // base v3
 
 			// 6 edges:
 			push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
@@ -1509,16 +1647,16 @@ void Tutorial::update(float dt) {
 		const float s = 0.35f; // pyramid size
 
 		// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
-		push_tetra(Vec3{-0.45f,  0.35f, 0.25f}, s,
+		push_tetra(vec3{-0.45f,  0.35f, 0.25f}, s,
 				0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
 
-		push_tetra(Vec3{ 0.45f,  0.35f, 0.55f}, s,
+		push_tetra(vec3{ 0.45f,  0.35f, 0.55f}, s,
 				0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
 
-		push_tetra(Vec3{-0.45f, -0.35f, 0.45f}, s,
+		push_tetra(vec3{-0.45f, -0.35f, 0.45f}, s,
 				0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
 
-		push_tetra(Vec3{ 0.45f, -0.35f, 0.15f}, s,
+		push_tetra(vec3{ 0.45f, -0.35f, 0.15f}, s,
 				0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
 
 		// assert(lines_vertices.size() == count);
