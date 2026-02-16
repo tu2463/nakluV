@@ -1285,33 +1285,33 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 		size_t i = 0;
 		if (driver.channel == S72::Driver::Channel::translation) {
 			driver.node.translation = S72::vec3{
-				.x = driver.values[i + 1],
-				.y = driver.values[i + 2],
-				.z = driver.values[i + 3]     
-			};
-		} else if (driver.channel == S72::Driver::Channel::rotation) {
-			driver.node.rotation = S72::quat{   
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2]};
+		}
+		else if (driver.channel == S72::Driver::Channel::rotation) {
+			driver.node.rotation = S72::quat{
 				.x = driver.values[i + 0],
 				.y = driver.values[i + 1],
 				.z = driver.values[i + 2],
-				.w = driver.values[i + 3] 
-			}; 
-		} else if (driver.channel == S72::Driver::Channel::scale) {
+				.w = driver.values[i + 3]};
+		}
+		else if (driver.channel == S72::Driver::Channel::scale) {
 			driver.node.scale = S72::vec3{
-				.x = driver.values[i + 1],
-				.y = driver.values[i + 2],
-				.z = driver.values[i + 3]   
-			};
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2]};
 		}
 	} else if (time > driver.times.back()) {
 		// after last keyframe, set to last keyframe value
 		// set the animated value to driver.values.back()
-		size_t i = driver.values.size() - 4;
+		size_t stride = (driver.channel == S72::Driver::Channel::rotation) ? 4 : 3;                                                                                                                           
+  		size_t i = driver.values.size() - stride;    
 		if (driver.channel == S72::Driver::Channel::translation) {
 			driver.node.translation = S72::vec3{
-				.x = driver.values[i + 1],
-				.y = driver.values[i + 2],
-				.z = driver.values[i + 3]     
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2]     
 			};
 		} else if (driver.channel == S72::Driver::Channel::rotation) {
 			driver.node.rotation = S72::quat{   
@@ -1322,9 +1322,9 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 			}; 
 		} else if (driver.channel == S72::Driver::Channel::scale) {
 			driver.node.scale = S72::vec3{
-				.x = driver.values[i + 1],
-				.y = driver.values[i + 2],
-				.z = driver.values[i + 3]   
+				.x = driver.values[i + 0],
+				.y = driver.values[i + 1],
+				.z = driver.values[i + 2]   
 			};
 		}
 	} else {
