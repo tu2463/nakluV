@@ -1449,6 +1449,7 @@ void Tutorial::update(float dt) {
 	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus)
 		// TODO: think about - can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
 		object_instances.clear();
+		scene_camera_instances.clear();
 
 		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
 

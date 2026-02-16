@@ -1,0 +1,182 @@
+["s72-v2",
+{
+	"type":"MATERIAL",
+	"name":"lambertian:red",
+	"lambertian":{
+		"albedo":[ 0.8, 0.1, 0.1 ]
+	}
+},
+{
+	"type":"MATERIAL",
+	"name":"lambertian:green",
+	"lambertian":{
+		"albedo":[ 0.1, 0.8, 0.1 ]
+	}
+},
+{
+	"type":"MATERIAL",
+	"name":"lambertian:blue",
+	"lambertian":{
+		"albedo":[ 0.1, 0.1, 0.8 ]
+	}
+},
+{
+	"type":"MATERIAL",
+	"name":"lambertian:yellow",
+	"lambertian":{
+		"albedo":[ 0.8, 0.8, 0.1 ]
+	}
+},
+{
+	"type":"MATERIAL",
+	"name":"lambertian:purple",
+	"lambertian":{
+		"albedo":[ 0.6, 0.1, 0.8 ]
+	}
+},
+{
+	"type":"MESH",
+	"name":"Torus-Red",
+	"topology":"TRIANGLE_LIST",
+	"count":11520,
+	"attributes":{
+		"POSITION":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:red"
+},
+{
+	"type":"MESH",
+	"name":"Torus-Green",
+	"topology":"TRIANGLE_LIST",
+	"count":11520,
+	"attributes":{
+		"POSITION":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:green"
+},
+{
+	"type":"MESH",
+	"name":"Torus-Blue",
+	"topology":"TRIANGLE_LIST",
+	"count":11520,
+	"attributes":{
+		"POSITION":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:blue"
+},
+{
+	"type":"MESH",
+	"name":"Torus-Yellow",
+	"topology":"TRIANGLE_LIST",
+	"count":11520,
+	"attributes":{
+		"POSITION":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:yellow"
+},
+{
+	"type":"MESH",
+	"name":"Torus-Purple",
+	"topology":"TRIANGLE_LIST",
+	"count":11520,
+	"attributes":{
+		"POSITION":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"sg-Grouping.Purple-Torus.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:purple"
+},
+{
+	"type":"NODE",
+	"name":"Torus1",
+	"translation":[0, 0, 0],
+	"rotation":[0, 0, 0, 1],
+	"scale":[5, 5, 5],
+	"mesh":"Torus-Red"
+},
+{
+	"type":"NODE",
+	"name":"Torus2",
+	"translation":[3, 2, -1],
+	"rotation":[0.383, 0, 0, 0.924],
+	"scale":[5, 5, 5],
+	"mesh":"Torus-Green"
+},
+{
+	"type":"NODE",
+	"name":"Torus3",
+	"translation":[-3, 2, -1],
+	"rotation":[0, 0.383, 0, 0.924],
+	"scale":[5, 5, 5],
+	"mesh":"Torus-Blue"
+},
+{
+	"type":"NODE",
+	"name":"Torus4",
+	"translation":[3, -2, -1],
+	"rotation":[0.271, 0.271, 0, 0.924],
+	"scale":[5, 5, 5],
+	"mesh":"Torus-Yellow"
+},
+{
+	"type":"NODE",
+	"name":"Torus5",
+	"translation":[-3, -2, -1],
+	"rotation":[0, 0.271, 0.271, 0.924],
+	"scale":[5, 5, 5],
+	"mesh":"Torus-Purple"
+},
+{
+	"type":"CAMERA",
+	"name":"Camera",
+	"perspective":{
+		"aspect":1.77778,
+		"vfov":1.0472,
+		"near":0.1,
+		"far":1000
+	}
+},
+{
+	"type":"NODE",
+	"name":"Camera",
+	"translation":[0, 0, 15],
+	"rotation":[0, 0, 0, 1],
+	"scale":[1, 1, 1],
+	"camera":"Camera"
+},
+{
+	"type":"LIGHT",
+	"name":"Sun",
+	"tint":[1, 1, 1],
+	"sun":{
+		"angle":0,
+		"strength":3.14159
+	}
+},
+{
+	"type":"NODE",
+	"name":"Sun",
+	"translation":[0, 0, 0],
+	"rotation":[0.259, 0.259, 0, 0.931],
+	"scale":[1, 1, 1],
+	"light":"Sun"
+},
+{
+	"type":"SCENE",
+	"name":"gpu-test-torus",
+	"roots":["Torus1", "Torus2", "Torus3", "Torus4", "Torus5", "Camera", "Sun"]
+}
+]
