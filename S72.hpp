@@ -18,7 +18,8 @@ struct S72 {
 
     static S72 load(std::string const &file);
     void process_meshes(); // extract vertices from binary data into pooled buffer
-    void load_textures(); // load texture images from disk using stb_image
+    void process_textures(); // load texture images from disk using stb_image
+    void process_drivers();
 
     // Pooled vertex data (populated by process_meshes):
     std::vector<PosNorTexTanVertex> vertices;
@@ -217,7 +218,7 @@ struct S72 {
 		//computed during loading:
 		std::string path; //path to data file, taking into account path to s72 file (relative to current working directory)
 
-		// Image data loaded from disk (populated by load_textures):
+		// Image data loaded from disk (populated by process_textures):
 		int width = 0;
 		int height = 0;
 		int channels = 0; // number of channels in the original image

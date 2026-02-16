@@ -173,7 +173,12 @@ struct Tutorial : RTG::Application {
 	// an event handling function that gets all input until cancelled
 	std::function< void(InputEvent const &) > action;
 
+	// -- movement -- 
 	float time = 0.0f;
+
+	// A1-move
+	float animation_time = 0.0f; // current playback position (seconds)
+	bool animation_playing = true;
 
 	// -- camera & culling --
 	enum class CullingMode {

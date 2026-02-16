@@ -134,7 +134,8 @@ int main(int argc, char **argv) {
 		try {
 			s72 = S72::load(configuration.scene_file);
 			s72.process_meshes(); // extract vertices from binary data
-			s72.load_textures(); // load texture images from disk
+			s72.process_textures(); // load texture images from disk
+			s72.process_drivers();
 		} catch (std::exception &e) {
 			// - e — the caught exception object
 			// - .what() — returns a const char* (C-string) containing the message passed when the exception was thrown

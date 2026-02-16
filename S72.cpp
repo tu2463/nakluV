@@ -1073,7 +1073,7 @@ void S72::process_meshes() {
     std::cout << "Total pooled vertices: " << vertices.size() << std::endl;
 }
 
-void S72::load_textures() {
+void S72::process_textures() {
     for (auto &[key, texture] : textures) {
         // Skip if already loaded
         if (!texture.pixels.empty()) continue;
@@ -1110,4 +1110,8 @@ void S72::load_textures() {
     }
 
     std::cout << "Loaded " << textures.size() << " textures." << std::endl;
+}
+
+void S72::process_drivers() {
+    std::cout << "Loaded " << drivers.size() << " drivers." << std::endl;
 }

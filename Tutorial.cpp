@@ -1270,6 +1270,13 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
+	if (animation_playing) {
+		if (!rtg.headless) {
+			animation_time += dt; // measure the elapsed time from the first frame
+		} else {
+			// TODO: in headless mode, using the times from the AVAILABLE events.
+		}
+	}
 
 	auto push_edge = [&](vec3 a, vec3 b,
 						 uint8_t ar, uint8_t ag, uint8_t ab, uint8_t aa,
@@ -1285,7 +1292,7 @@ void Tutorial::update(float dt) {
 	};
 
 	{ // add each s72 mesh to object_instances (previously create some objects: sphere surrounded by rotating torus)
-		// TODO: can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
+		// TODO: think about - can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
 		object_instances.clear();
 
 		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
