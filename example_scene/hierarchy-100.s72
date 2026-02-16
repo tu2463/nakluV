@@ -1,0 +1,944 @@
+["s72-v2",
+{
+	"type":"CAMERA",
+	"name":"Camera",
+	"perspective":{
+		"aspect":1.77778,
+		"vfov":1.0,
+		"near":0.1,
+		"far":1000
+	}
+},
+{
+	"type":"NODE",
+	"name":"Camera",
+	"translation":[0,0,50],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"camera":"Camera"
+},
+{
+	"type":"MATERIAL",
+	"name":"lambertian:Red",
+	"lambertian":{
+		"albedo":[ 0.8, 0.2, 0.1 ]
+	}
+},
+{
+	"type":"MESH",
+	"name":"Cube",
+	"topology":"TRIANGLE_LIST",
+	"count":36,
+	"attributes":{
+		"POSITION":{ "src":"materials.Cube.pnTt.b72", "offset":0, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"NORMAL":{ "src":"materials.Cube.pnTt.b72", "offset":12, "stride":48, "format":"R32G32B32_SFLOAT" },
+		"TANGENT":{ "src":"materials.Cube.pnTt.b72", "offset":24, "stride":48, "format":"R32G32B32A32_SFLOAT" },
+		"TEXCOORD":{ "src":"materials.Cube.pnTt.b72", "offset":40, "stride":48, "format":"R32G32_SFLOAT" }
+	},
+	"material":"lambertian:Red"
+},
+{
+	"type":"NODE",
+	"name":"Node_99",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube"
+},
+{
+	"type":"NODE",
+	"name":"Node_98",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_99"]
+},
+{
+	"type":"NODE",
+	"name":"Node_97",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_98"]
+},
+{
+	"type":"NODE",
+	"name":"Node_96",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_97"]
+},
+{
+	"type":"NODE",
+	"name":"Node_95",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_96"]
+},
+{
+	"type":"NODE",
+	"name":"Node_94",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_95"]
+},
+{
+	"type":"NODE",
+	"name":"Node_93",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_94"]
+},
+{
+	"type":"NODE",
+	"name":"Node_92",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_93"]
+},
+{
+	"type":"NODE",
+	"name":"Node_91",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_92"]
+},
+{
+	"type":"NODE",
+	"name":"Node_90",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_91"]
+},
+{
+	"type":"NODE",
+	"name":"Node_89",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_90"]
+},
+{
+	"type":"NODE",
+	"name":"Node_88",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_89"]
+},
+{
+	"type":"NODE",
+	"name":"Node_87",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_88"]
+},
+{
+	"type":"NODE",
+	"name":"Node_86",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_87"]
+},
+{
+	"type":"NODE",
+	"name":"Node_85",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_86"]
+},
+{
+	"type":"NODE",
+	"name":"Node_84",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_85"]
+},
+{
+	"type":"NODE",
+	"name":"Node_83",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_84"]
+},
+{
+	"type":"NODE",
+	"name":"Node_82",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_83"]
+},
+{
+	"type":"NODE",
+	"name":"Node_81",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_82"]
+},
+{
+	"type":"NODE",
+	"name":"Node_80",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_81"]
+},
+{
+	"type":"NODE",
+	"name":"Node_79",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_80"]
+},
+{
+	"type":"NODE",
+	"name":"Node_78",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_79"]
+},
+{
+	"type":"NODE",
+	"name":"Node_77",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_78"]
+},
+{
+	"type":"NODE",
+	"name":"Node_76",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_77"]
+},
+{
+	"type":"NODE",
+	"name":"Node_75",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_76"]
+},
+{
+	"type":"NODE",
+	"name":"Node_74",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_75"]
+},
+{
+	"type":"NODE",
+	"name":"Node_73",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_74"]
+},
+{
+	"type":"NODE",
+	"name":"Node_72",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_73"]
+},
+{
+	"type":"NODE",
+	"name":"Node_71",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_72"]
+},
+{
+	"type":"NODE",
+	"name":"Node_70",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_71"]
+},
+{
+	"type":"NODE",
+	"name":"Node_69",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_70"]
+},
+{
+	"type":"NODE",
+	"name":"Node_68",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_69"]
+},
+{
+	"type":"NODE",
+	"name":"Node_67",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_68"]
+},
+{
+	"type":"NODE",
+	"name":"Node_66",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_67"]
+},
+{
+	"type":"NODE",
+	"name":"Node_65",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_66"]
+},
+{
+	"type":"NODE",
+	"name":"Node_64",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_65"]
+},
+{
+	"type":"NODE",
+	"name":"Node_63",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_64"]
+},
+{
+	"type":"NODE",
+	"name":"Node_62",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_63"]
+},
+{
+	"type":"NODE",
+	"name":"Node_61",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_62"]
+},
+{
+	"type":"NODE",
+	"name":"Node_60",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_61"]
+},
+{
+	"type":"NODE",
+	"name":"Node_59",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_60"]
+},
+{
+	"type":"NODE",
+	"name":"Node_58",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_59"]
+},
+{
+	"type":"NODE",
+	"name":"Node_57",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_58"]
+},
+{
+	"type":"NODE",
+	"name":"Node_56",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_57"]
+},
+{
+	"type":"NODE",
+	"name":"Node_55",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_56"]
+},
+{
+	"type":"NODE",
+	"name":"Node_54",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_55"]
+},
+{
+	"type":"NODE",
+	"name":"Node_53",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_54"]
+},
+{
+	"type":"NODE",
+	"name":"Node_52",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_53"]
+},
+{
+	"type":"NODE",
+	"name":"Node_51",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_52"]
+},
+{
+	"type":"NODE",
+	"name":"Node_50",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_51"]
+},
+{
+	"type":"NODE",
+	"name":"Node_49",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_50"]
+},
+{
+	"type":"NODE",
+	"name":"Node_48",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_49"]
+},
+{
+	"type":"NODE",
+	"name":"Node_47",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_48"]
+},
+{
+	"type":"NODE",
+	"name":"Node_46",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_47"]
+},
+{
+	"type":"NODE",
+	"name":"Node_45",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_46"]
+},
+{
+	"type":"NODE",
+	"name":"Node_44",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_45"]
+},
+{
+	"type":"NODE",
+	"name":"Node_43",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_44"]
+},
+{
+	"type":"NODE",
+	"name":"Node_42",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_43"]
+},
+{
+	"type":"NODE",
+	"name":"Node_41",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_42"]
+},
+{
+	"type":"NODE",
+	"name":"Node_40",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_41"]
+},
+{
+	"type":"NODE",
+	"name":"Node_39",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_40"]
+},
+{
+	"type":"NODE",
+	"name":"Node_38",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_39"]
+},
+{
+	"type":"NODE",
+	"name":"Node_37",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_38"]
+},
+{
+	"type":"NODE",
+	"name":"Node_36",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_37"]
+},
+{
+	"type":"NODE",
+	"name":"Node_35",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_36"]
+},
+{
+	"type":"NODE",
+	"name":"Node_34",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_35"]
+},
+{
+	"type":"NODE",
+	"name":"Node_33",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_34"]
+},
+{
+	"type":"NODE",
+	"name":"Node_32",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_33"]
+},
+{
+	"type":"NODE",
+	"name":"Node_31",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_32"]
+},
+{
+	"type":"NODE",
+	"name":"Node_30",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_31"]
+},
+{
+	"type":"NODE",
+	"name":"Node_29",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_30"]
+},
+{
+	"type":"NODE",
+	"name":"Node_28",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_29"]
+},
+{
+	"type":"NODE",
+	"name":"Node_27",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_28"]
+},
+{
+	"type":"NODE",
+	"name":"Node_26",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_27"]
+},
+{
+	"type":"NODE",
+	"name":"Node_25",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_26"]
+},
+{
+	"type":"NODE",
+	"name":"Node_24",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_25"]
+},
+{
+	"type":"NODE",
+	"name":"Node_23",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_24"]
+},
+{
+	"type":"NODE",
+	"name":"Node_22",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_23"]
+},
+{
+	"type":"NODE",
+	"name":"Node_21",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_22"]
+},
+{
+	"type":"NODE",
+	"name":"Node_20",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_21"]
+},
+{
+	"type":"NODE",
+	"name":"Node_19",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_20"]
+},
+{
+	"type":"NODE",
+	"name":"Node_18",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_19"]
+},
+{
+	"type":"NODE",
+	"name":"Node_17",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_18"]
+},
+{
+	"type":"NODE",
+	"name":"Node_16",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_17"]
+},
+{
+	"type":"NODE",
+	"name":"Node_15",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_16"]
+},
+{
+	"type":"NODE",
+	"name":"Node_14",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_15"]
+},
+{
+	"type":"NODE",
+	"name":"Node_13",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_14"]
+},
+{
+	"type":"NODE",
+	"name":"Node_12",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_13"]
+},
+{
+	"type":"NODE",
+	"name":"Node_11",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_12"]
+},
+{
+	"type":"NODE",
+	"name":"Node_10",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_11"]
+},
+{
+	"type":"NODE",
+	"name":"Node_9",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_10"]
+},
+{
+	"type":"NODE",
+	"name":"Node_8",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_9"]
+},
+{
+	"type":"NODE",
+	"name":"Node_7",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_8"]
+},
+{
+	"type":"NODE",
+	"name":"Node_6",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_7"]
+},
+{
+	"type":"NODE",
+	"name":"Node_5",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_6"]
+},
+{
+	"type":"NODE",
+	"name":"Node_4",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_5"]
+},
+{
+	"type":"NODE",
+	"name":"Node_3",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_4"]
+},
+{
+	"type":"NODE",
+	"name":"Node_2",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_3"]
+},
+{
+	"type":"NODE",
+	"name":"Node_1",
+	"translation":[0.1,0.1,0.1],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_2"]
+},
+{
+	"type":"NODE",
+	"name":"Node_0",
+	"translation":[0,0,0],
+	"rotation":[0,0,0,1],
+	"scale":[1,1,1],
+	"mesh":"Cube",
+	"children":["Node_1"]
+},
+{
+	"type":"SCENE",
+	"name":"hierarchy-100",
+	"roots":["Camera", "Node_0"]
+}
+]

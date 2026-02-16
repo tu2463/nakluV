@@ -947,6 +947,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		vkCmdCopyBuffer(workspace.command_buffer, workspace.World_src.handle, workspace.World.handle, 1, &copy_region);
 	}
 
+	// object_instances.clear(); // used for CPU bottleneck testing;
 	if (!object_instances.empty()) { // upload object transforms:
 		//[re-]allocate object buffers if needed:
 		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
