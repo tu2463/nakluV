@@ -151,6 +151,7 @@ struct Tutorial : RTG::Application {
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
 	std::unordered_map< S72::Texture*, uint32_t > texture_index_map; // maps S72 texture pointers to texture indices
+	std::unordered_map< S72::Material*, uint32_t > material_albedo_map; // maps materials to their albedo texture index
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:

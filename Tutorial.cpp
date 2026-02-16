@@ -355,6 +355,66 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::cout << "Created " << textures.size() << " GPU textures (including default white)." << std::endl;
 	}
 
+	{ // create texture indices for materials and textures for color albedos
+		for (auto &[name, mat] : s72.materials) {
+			uint32_t tex_index = 0; // default white
+
+			if (auto* pbr = std::get_if<S72::Material::PBR>(&mat.brdf)) {
+				if (auto* tex = std::get_if<S72::Texture*>(&pbr->albedo)) {
+					auto it = texture_index_map.find(*tex);
+					if (it != texture_index_map.end()) {
+						tex_index = it->second;
+					}
+				} else if (auto* col = std::get_if<S72::color>(&pbr->albedo)) {
+					// Create 1x1 texture from color
+					uint8_t r = static_cast<uint8_t>(std::clamp(col->r, 0.0f, 1.0f) * 255.0f);
+					uint8_t g = static_cast<uint8_t>(std::clamp(col->g, 0.0f, 1.0f) * 255.0f);
+					uint8_t b = static_cast<uint8_t>(std::clamp(col->b, 0.0f, 1.0f) * 255.0f);
+					uint32_t pixel = (r) | (g << 8) | (b << 16) | (0xFF << 24); // RGBA little-endian
+					std::vector<uint32_t> data = {pixel};
+
+					tex_index = static_cast<uint32_t>(textures.size());
+					textures.emplace_back(rtg.helpers.create_image(
+						VkExtent2D{.width = 1, .height = 1},
+						VK_FORMAT_R8G8B8A8_UNORM,
+						VK_IMAGE_TILING_OPTIMAL,
+						VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+						VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+						Helpers::Unmapped));
+					rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
+				}
+			} else if (auto* lambertian = std::get_if<S72::Material::Lambertian>(&mat.brdf)) {
+				if (auto* tex = std::get_if<S72::Texture*>(&lambertian->albedo)) {
+					auto it = texture_index_map.find(*tex);
+					if (it != texture_index_map.end()) {
+						tex_index = it->second;
+					}
+				} else if (auto* col = std::get_if<S72::color>(&lambertian->albedo)) {
+					// Create 1x1 texture from color
+					uint8_t r = static_cast<uint8_t>(std::clamp(col->r, 0.0f, 1.0f) * 255.0f);
+					uint8_t g = static_cast<uint8_t>(std::clamp(col->g, 0.0f, 1.0f) * 255.0f);
+					uint8_t b = static_cast<uint8_t>(std::clamp(col->b, 0.0f, 1.0f) * 255.0f);
+					uint32_t pixel = (r) | (g << 8) | (b << 16) | (0xFF << 24); // RGBA little-endian
+					std::vector<uint32_t> data = {pixel};
+
+					tex_index = static_cast<uint32_t>(textures.size());
+					textures.emplace_back(rtg.helpers.create_image(
+						VkExtent2D{.width = 1, .height = 1},
+						VK_FORMAT_R8G8B8A8_UNORM,
+						VK_IMAGE_TILING_OPTIMAL,
+						VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+						VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+						Helpers::Unmapped));
+					rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
+				}
+			}
+			// Mirror and Environment materials use default white (tex_index = 0)
+
+			material_albedo_map[&mat] = tex_index;
+		}
+		std::cout << "Mapped " << material_albedo_map.size() << " materials to texture indices." << std::endl;
+	}
+
 	{ // make image views for each texture image
 		for (Helpers::AllocatedImage const &image : textures) {
 			// An image view describes how to access an image — Vulkan requires you to create a view before you can use an image in a shader or pipeline.
@@ -1213,27 +1273,9 @@ void Tutorial::update(float dt) {
 				// Determine texture index from material
 				uint32_t tex_index = 0; // default white texture
 				if (node->mesh->material != nullptr) {
-					// Check for albedo texture in material
-					S72::Material* mat = node->mesh->material;
-					S72::Texture* albedo_texture = nullptr;
-
-					// Try to get albedo texture from the material's BRDF
-					if (auto* pbr = std::get_if<S72::Material::PBR>(&mat->brdf)) {
-						if (auto* tex = std::get_if<S72::Texture*>(&pbr->albedo)) {
-							albedo_texture = *tex;
-						}
-					} else if (auto* lambertian = std::get_if<S72::Material::Lambertian>(&mat->brdf)) {
-						if (auto* tex = std::get_if<S72::Texture*>(&lambertian->albedo)) {
-							albedo_texture = *tex;
-						}
-					}
-
-					// Look up texture index
-					if (albedo_texture != nullptr) {
-						auto it = texture_index_map.find(albedo_texture);
-						if (it != texture_index_map.end()) {
-							tex_index = it->second;
-						}
+					auto it = material_albedo_map.find(node->mesh->material);
+					if (it != material_albedo_map.end()) {
+						tex_index = it->second;
 					}
 				}
 

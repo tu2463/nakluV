@@ -777,7 +777,7 @@ S72 S72::load(std::string const &scene_file) {
 							throw std::runtime_error("Material \"" + name + "\"'s lambertian.albedo was an array but it didn't hold exactly three numbers.");
 						}
 						obj.erase(f);
-					} else {
+					} else { // png
 						lambertian.albedo = &extract_map(&obj, "albedo", &s72, "Material \"" + name + "\"'s lambertian.albedo");
 					}
 				}
