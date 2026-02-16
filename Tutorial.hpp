@@ -180,6 +180,8 @@ struct Tutorial : RTG::Application {
 	float animation_time = 0.0f; // current playback position (seconds)
 	bool animation_playing = true;
 
+	void evaluate_driver(S72::Driver& driver, float t);
+
 	// -- camera & culling --
 	enum class CullingMode {
 		None = 0,

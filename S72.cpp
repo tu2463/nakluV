@@ -1111,7 +1111,3 @@ void S72::process_textures() {
 
     std::cout << "Loaded " << textures.size() << " textures." << std::endl;
 }
-
-void S72::process_drivers() {
-    std::cout << "Loaded " << drivers.size() << " drivers." << std::endl;
-}

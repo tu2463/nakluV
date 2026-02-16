@@ -199,7 +199,7 @@ struct S72 {
 		} interpolation = Interpolation::LINEAR;
 	};
 	//NOTE: drivers are stored in a vector in the order they appear in the file.
-	//      This is because drivers are applied in file order: //??
+	//      This is because drivers are applied in file order: //vv
     std::vector< Driver > drivers;
 
     //textures are not objects from the scene, but referenced by materials:

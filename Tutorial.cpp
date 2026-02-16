@@ -831,7 +831,7 @@ static bool SAT_visibility_test(const Tutorial::CullingFrustum& frustum, const m
 			}
 		}
 	}
-	return
+	return true;
 }
 
 void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
@@ -1268,13 +1268,50 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	}
 }
 
+// evaluate driver's state at animation_time and write into driver.node.translation/rotation/scale
+void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
+	if (driver.times.empty()) {
+		// no keyframes, do nothing
+		return;
+	}
+
+	// find keyframe interval
+	size_t i = 0;
+	if (time < driver.times[0]) {
+		// before first keyframe, set to first keyframe value
+		// set the animated value to driver.values[0]
+		i = 0;
+	} else if (time > driver.times.back()) {
+		// after last keyframe, set to last keyframe value
+		// set the animated value to driver.values.back()
+		i = driver.times.size() - 1;
+	} else {
+		// time is between keyframes, find the interval [times[i], times[i+1]] that contains animation_time
+		while (i < driver.times.size() && driver.times[i] <= time) {
+			i++;
+		}
+	}
+
+	if (driver.interpolation == S72::Driver::Interpolation::STEP) {
+		// TODO: the output value in the middle of a time interval is the value at the beginning of that interval.
+	} else if (driver.interpolation == S72::Driver::Interpolation::LINEAR) {
+		// TODO: the output value in the middle of a time interval is a linear mix of the starting and ending values.
+	} else if (driver.interpolation == S72::Driver::Interpolation::SLERP) {
+		// TODO: the output value in the middle of a time interval is a "spherical linear interpolation" between the starting and ending values. (Doesn't make sense for 1D signals or non-normalized signals.)
+	}
+}
+
 void Tutorial::update(float dt) {
 	time  = std::fmod(time + dt, 60.0f);
 	if (animation_playing) {
-		if (!rtg.headless) {
+		if (!rtg.configuration.headless) {
 			animation_time += dt; // measure the elapsed time from the first frame
 		} else {
 			// TODO: in headless mode, using the times from the AVAILABLE events.
+		}
+
+		for (S72::Driver& driver : s72.drivers) {
+			evaluate_driver(driver, animation_time);
 		}
 	}
 
