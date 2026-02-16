@@ -1055,7 +1055,7 @@ void S72::process_meshes() {
                 } else if (attr_name == "NORMAL") {
                     vertex.Normal = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8)};
                 } else if (attr_name == "TEXCOORD") {
-                    vertex.TexCoord = {read_float(ptr), read_float(ptr + 4)};
+                    vertex.TexCoord = {read_float(ptr), 1.0f - read_float(ptr + 4)}; // need to flip V to make sure origin_check works correctly. TODO: check if this is correct? 
                 } else if (attr_name == "TANGENT") {
                     vertex.Tangent = {read_float(ptr), read_float(ptr + 4), read_float(ptr + 8), read_float(ptr + 12)};
                 }

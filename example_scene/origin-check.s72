@@ -50,7 +50,7 @@
 	"type":"CAMERA",
 	"name":"Camera",
 	"perspective":{
-		"aspect":1,
+		"aspect":1.33,
 		"vfov":0.291321,
 		"near":0.1,
 		"far":100
