@@ -223,6 +223,28 @@ For each node with a camera, an SceneCamera is created containing the S72::Camer
 </p>
 
 <p class="answer">
+During S72::load_textures(), texture images referenced by materials are loaded via stbi_load() into S72::Texture::pixels. In the Tutorial constructor, textures are uploaded to the GPU:
+</p>
+
+<ul class="answer">
+<li>Each S72::Texture is uploaded as a Helpers::AllocatedImage via rtg.helpers.create_image() and transfer_to_image(), stored in std::vectorHelpers::AllocatedImage textures</li>
+<li>texture_index_map (std::unordered_map<S72::Texture*, uint32_t>) maps texture pointers to array indices</li>
+</ul>
+
+<p class="answer">
+A material_albedo_map (std::unordered_map<S72::Material*, uint32_t>) is precomputed to lookup textures. 
+</p>
+
+<ul class="answer">
+<li>For materials with texture albedos: look up index via texture_index_map</li>
+<li>For materials with color albedos (without a texture image), a 1×1 texture is created from the color and added to the texture array</li>
+</ul>
+
+<p class="answer">
+VkImageView handles are created for each texture in texture_views, and a single VkSampler is used for the textures. These are bound via descriptor sets at set=2.
+</p>
+
+<p class="answer">
 When loading the s72 scene, all vertices are pooled into std::vector<PosNorTexTanVertex> vertices. 
 </p>
 
