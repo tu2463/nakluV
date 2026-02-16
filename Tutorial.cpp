@@ -1853,6 +1853,18 @@ void Tutorial::on_input(InputEvent const &evt) {
 		return;
 	}
 
+	// animation controls:
+	if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_P) {
+		animation_playing = !animation_playing;
+		std::cout << "Animation " << (animation_playing ? "playing" : "paused") << std::endl;
+		return;
+	}
+	if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_R) {
+		animation_time = 0.0f;
+		std::cout << "Animation restarted" << std::endl;
+		return;
+	}
+
 	// scene camera controls:
 	if (camera_mode == CameraMode::Scene) {
 		if (evt.type == InputEvent::KeyDown && evt.key.key == GLFW_KEY_SPACE) {
