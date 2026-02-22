@@ -104,7 +104,7 @@
 	"name":"Torus1",
 	"translation":[0, 0, 0],
 	"rotation":[0, 0, 0, 1],
-	"scale":[1, 1, 1],
+	"scale":[5, 5, 5],
 	"mesh":"Torus-Red"
 },
 {
@@ -112,7 +112,7 @@
 	"name":"Torus2",
 	"translation":[3, 2, -1],
 	"rotation":[0.383, 0, 0, 0.924],
-	"scale":[1, 1, 1],
+	"scale":[5, 5, 5],
 	"mesh":"Torus-Green"
 },
 {
@@ -120,7 +120,7 @@
 	"name":"Torus3",
 	"translation":[-3, 2, -1],
 	"rotation":[0, 0.383, 0, 0.924],
-	"scale":[1, 1, 1],
+	"scale":[5, 5, 5],
 	"mesh":"Torus-Blue"
 },
 {
@@ -128,7 +128,7 @@
 	"name":"Torus4",
 	"translation":[3, -2, -1],
 	"rotation":[0.271, 0.271, 0, 0.924],
-	"scale":[1, 1, 1],
+	"scale":[5, 5, 5],
 	"mesh":"Torus-Yellow"
 },
 {
@@ -136,7 +136,7 @@
 	"name":"Torus5",
 	"translation":[-3, -2, -1],
 	"rotation":[0, 0.271, 0.271, 0.924],
-	"scale":[1, 1, 1],
+	"scale":[5, 5, 5],
 	"mesh":"Torus-Purple"
 },
 {
@@ -173,81 +173,6 @@
 	"rotation":[0.259, 0.259, 0, 0.931],
 	"scale":[1, 1, 1],
 	"light":"Sun"
-},
-{
-	"type":"DRIVER",
-	"name":"Torus1-rotation",
-	"node":"Torus1",
-	"channel":"rotation",
-	"times":[0.0, 1.25, 2.5, 3.75, 5.0],
-	"values":[
-		0, 0, 0, 1,
-		0, 0.7071, 0, 0.7071,
-		0, 1, 0, 0,
-		0, 0.7071, 0, -0.7071,
-		0, 0, 0, -1
-	],
-	"interpolation":"SLERP"
-},
-{
-	"type":"DRIVER",
-	"name":"Torus2-rotation",
-	"node":"Torus2",
-	"channel":"rotation",
-	"times":[0.0, 1.25, 2.5, 3.75, 5.0],
-	"values":[
-		0, 0, 0, 1,
-		0.7071, 0, 0, 0.7071,
-		1, 0, 0, 0,
-		0.7071, 0, 0, -0.7071,
-		0, 0, 0, -1
-	],
-	"interpolation":"SLERP"
-},
-{
-	"type":"DRIVER",
-	"name":"Torus3-rotation",
-	"node":"Torus3",
-	"channel":"rotation",
-	"times":[0.0, 1.25, 2.5, 3.75, 5.0],
-	"values":[
-		0, 0, 0, 1,
-		0, 0, 0.7071, 0.7071,
-		0, 0, 1, 0,
-		0, 0, 0.7071, -0.7071,
-		0, 0, 0, -1
-	],
-	"interpolation":"SLERP"
-},
-{
-	"type":"DRIVER",
-	"name":"Torus4-rotation",
-	"node":"Torus4",
-	"channel":"rotation",
-	"times":[0.0, 1.25, 2.5, 3.75, 5.0],
-	"values":[
-		0, 0, 0, 1,
-		0, 0.7071, 0, 0.7071,
-		0, 1, 0, 0,
-		0, 0.7071, 0, -0.7071,
-		0, 0, 0, -1
-	],
-	"interpolation":"SLERP"
-},
-{
-	"type":"DRIVER",
-	"name":"Torus5-rotation",
-	"node":"Torus5",
-	"channel":"rotation",
-	"times":[0.0, 1.25, 2.5, 3.75, 5.0],
-	"values":[
-		0, 0, 0, 1,
-		0.7071, 0, 0, 0.7071,
-		1, 0, 0, 0,
-		0.7071, 0, 0, -0.7071,
-		0, 0, 0, -1
-	],
-	"interpolation":"SLERP"
 },
 {
 	"type":"SCENE",

@@ -180,6 +180,10 @@ struct Tutorial : RTG::Application {
 	float animation_time = 0.0f; // current playback position (seconds)
 	bool animation_playing = true;
 
+	// FPS tracking
+	float fps_accumulator = 0.0f;
+	int fps_frame_count = 0;
+
 	void evaluate_driver(S72::Driver& driver, float t);
 
 	// -- camera & culling --

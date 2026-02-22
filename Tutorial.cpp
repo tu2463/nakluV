@@ -1420,6 +1420,17 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 }
 
 void Tutorial::update(float dt) {
+	// FPS tracking
+	fps_accumulator += dt;
+	fps_frame_count++;
+	if (fps_accumulator >= 1.0f) {
+		float fps = fps_frame_count / fps_accumulator;
+		float ms_per_frame = (fps_accumulator / fps_frame_count) * 1000.0f;
+		std::cout << "FPS: " << fps << " (" << ms_per_frame << " ms/frame)" << std::endl;
+		fps_accumulator = 0.0f;
+		fps_frame_count = 0;
+	}
+
 	time  = std::fmod(time + dt, 60.0f);
 	if (animation_playing) {
 		if (!rtg.configuration.headless) {
