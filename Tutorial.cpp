@@ -340,36 +340,48 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			uint32_t texture_index = static_cast<uint32_t>(textures.size());
 			texture_index_map[&s72_texture] = texture_index;
 
-			// Choose format based on the texture's format specification
+			// Choose format, VkImageCreateFlags, arrayLayers, layerCount based on the texture's specification
+			const void *data = s72_texture.pixels.data();
+			size_t data_size = s72_texture.pixels.size(); // pixels is uint8_t, so .size() == byte count
 			VkFormat format;
+			VkImageCreateFlags flags = 0;
+			uint32_t arrayLayers = 1;
+			uint32_t layerCount = 1;
+			uint32_t img_width = static_cast<uint32_t>(s72_texture.width);
+			uint32_t img_height = static_cast<uint32_t>(s72_texture.height);
 			switch (s72_texture.format) {
 				case S72::Texture::Format::srgb:
 					format = VK_FORMAT_R8G8B8A8_SRGB;
 					break;
 				case S72::Texture::Format::linear:
+					// format = VK_FORMAT_R8G8B8A8_UNORM; // A2-env-TODO check: what format should this be?
+					break;
 				case S72::Texture::Format::rgbe:
-					/* Instruction:
-					You must use a pixel format for environment images which can support high dynamic range. 
-					An easy, but wasteful, way to do this is by decoding the images, on-CPU, to VK_FORMAT_R32G32B32A32_SFLOAT (yes, the alpha channel is needed to guarantee GPU support, acc'd to the required format support table). 
-					A more memory-efficient method is to transcode to VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 shared-exponent format or the VK_FORMAT_R16G16B16A16_SFLOAT half-float format; 
-					though you will need to be careful to correctly clamp under- and over-flowing values when translating.
-					*/
-					VK_FORMAT_R32G32B32A32_SFLOAT; // TODO: see if we can use less wasteful format
+					data = s72_texture.RGBE_floats.data();
+					data_size = s72_texture.RGBE_floats.size() * sizeof(float); // in bytes
+					format = cubemap_format;
+					// cubmap has 6 faces stacked vertically in the source image, so per-face height = total height / 6
+					img_height = img_height / 6;
+					flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+					arrayLayers = 6;
+					layerCount = 6;
+					break;
 				default:
 					format = VK_FORMAT_R8G8B8A8_UNORM;
 					break;
 			}
 
 			textures.emplace_back(rtg.helpers.create_image(
-				VkExtent2D{.width = static_cast<uint32_t>(s72_texture.width), .height = static_cast<uint32_t>(s72_texture.height)},
+				VkExtent2D{.width = img_width, .height = img_height},
 				format,
 				VK_IMAGE_TILING_OPTIMAL,
 				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-				Helpers::Unmapped));
+				Helpers::Unmapped,
+				flags,
+				arrayLayers));
 
-			rtg.helpers.transfer_to_image(s72_texture.pixels.data(), s72_texture.pixels.size(), textures.back());
-
+			rtg.helpers.transfer_to_image(data, data_size, textures.back(), layerCount);
 			std::cout << "Created GPU texture for: " << s72_texture.src << " at index " << texture_index << std::endl;
 		}
 
@@ -439,17 +451,19 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	{ // make image views for each texture image
 		for (Helpers::AllocatedImage const &image : textures) {
 			// An image view describes how to access an image — Vulkan requires you to create a view before you can use an image in a shader or pipeline.
+			bool is_cubemap = (image.format == cubemap_format);
+
 			VkImageViewCreateInfo create_info{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.flags = 0,
 				.image = image.handle, // The underlying VkImage handle this view refers to.
-				.viewType = VK_IMAGE_VIEW_TYPE_2D, // Treat the image as a standard 2D texture.
+				.viewType = is_cubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, // if not cube map, treat the image as a standard 2D texture.
 				.format = image.format, // Use the same format the image was created with (e.g., VK_FORMAT_R8G8B8A8_SRGB).
-				// .components sets swizzling and is fine when zero-initialied; Left zero-initialized, which means no channel swizzling — R maps to R, G to G, etc. (identity mapping). 
+				// .components sets swizzling and is fine when zero-initialied; Left zero-initialized, which means no channel swizzling — R maps to R, G to G, etc. (identity mapping).
 				.subresourceRange{ // Specifies which part of the image to view:
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // this is a color image (not depth/stencil).
 					.baseMipLevel = 0, .levelCount = 1, // only the base mip level (no mipmaps).
-					.baseArrayLayer = 0, .layerCount = 1, // single layer (not an array texture). 
+					.baseArrayLayer = 0, .layerCount = is_cubemap ? 6u : 1u, // 6 layers for cubemap, 1 for non-array texture
 				},
 			};
 

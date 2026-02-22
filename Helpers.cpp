@@ -121,7 +121,7 @@ void Helpers::destroy_buffer(AllocatedBuffer &&buffer) {
 }
 
 
-Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map) {
+Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map, VkImageCreateFlags flags, uint32_t arrayLayers) {
 	// 1. create the VkImage
 	AllocatedImage image;
 	// refsol::Helpers_create_image(rtg, extent, format, tiling, usage, properties, (map == Mapped), &image);
@@ -138,12 +138,13 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 			.depth = 1
 		},
 		.mipLevels = 1,
-		.arrayLayers = 1,
+		.arrayLayers = arrayLayers, // number of layers in the image
 		.samples = VK_SAMPLE_COUNT_1_BIT, // No multisampling
 		.tiling = tiling,
 		.usage = usage,
 		.sharingMode = VK_SHARING_MODE_EXCLUSIVE, //  the buffer/image is owned by one queue family at a time.
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, // if you wanted to specify images directly by writing data to mapped memory (instead of copying from a buffer) you'd instead set this to VK_IMAGE_LAYOUT_PREINITIALIZED and the tiling to VK_IMAGE_TILING_LINEAR, which together would guarantee a known image layout.
+		.flags = flags, // if flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, the image can be used to create a VkImageView of type VK_IMAGE_VIEW_TYPE_CUBE or VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
 	};
 
 	VK( vkCreateImage(rtg.device, &create_info, nullptr, &image.handle) );
@@ -227,7 +228,7 @@ void Helpers::transfer_to_buffer(void const *data, size_t size, AllocatedBuffer 
 	destroy_buffer(std::move(transfer_src)); // what does std::move do //??
 }
 
-void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target) {
+void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount) {
 	// refsol::Helpers_transfer_to_image(rtg, data, size, &target);
 
 	assert(target.handle != VK_NULL_HANDLE); // target imgage should be allocated already
@@ -264,7 +265,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		.baseMipLevel = 0, // Start at mip 0 (full resolution)     
 		.levelCount = 1, // Only 1 mip level                                       
 		.baseArrayLayer = 0, // Start at layer 0   
-		.layerCount = 1, // Only 1 layer 
+		.layerCount = layerCount, // 1 layer initially; 6 layers for cube maps
 	};
 
 	{ // put the receiving image in destination-optimal layout [new]
@@ -305,35 +306,43 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		);
 	}
 
-	{ // copy the source buffer to the image [new]
+	{ // copy the source buffer to the image
 		// describe what part of the image to copy;
 		// parameters indicate buffer and image to copy between and the current format of the image:
-		VkBufferImageCopy region{
-			.bufferOffset = 0,
-			.bufferRowLength = target.extent.width,
-			.bufferImageHeight = target.extent.height,
-			.imageSubresource{ // Frustratingly, the imageSubresource field of VkBufferImageCopy is a VkImageSubresourceLayers not a VkImageSubresourceRange, otherwise we could have used our convenient whole_image structure from above.
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.mipLevel = 0,
-				.baseArrayLayer = 0,
-				.layerCount = 1,
-			},
-			.imageOffset{ .x = 0, .y = 0, .z = 0 },
-			.imageExtent{
-				.width = target.extent.width,
-				.height = target.extent.height,
-				.depth = 1
-			},
-		};
+		for (uint32_t base_array_layer_i = 0; base_array_layer_i < layerCount; base_array_layer_i++) {
+			VkBufferImageCopy region{
+				/* bufferOffset = the offset in bytes from the start of the buffer object where the image data is copied from or to
+					for cube maps with 6 faces: bufferOffset = i * face_size_in_bytes      
+					the size param of this fn = total size of all the data being uploaded                                                                                                                                                       
+  					face_size_in_bytes = face_width * face_height * bytes_per_pixel = size / 6
+				*/
+				.bufferOffset = base_array_layer_i * (size / layerCount),
+				.bufferRowLength = target.extent.width,
+				.bufferImageHeight = target.extent.height,
+				.imageSubresource{ // Frustratingly, the imageSubresource field of VkBufferImageCopy is a VkImageSubresourceLayers not a VkImageSubresourceRange, otherwise we could have used our convenient whole_image structure from above.
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.mipLevel = 0,
+					.baseArrayLayer = base_array_layer_i,
+					.layerCount = 1,
+				},
+				.imageOffset{ .x = 0, .y = 0, .z = 0 },
+				.imageExtent{
+					.width = target.extent.width,
+					.height = target.extent.height,
+					.depth = 1
+				},
+			};
 
-		vkCmdCopyBufferToImage(
-			transfer_command_buffer,
-			transfer_src.handle,
-			target.handle,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1, &region // region count, region ptr
-		);
-		// NOTE: if image had mip levels, would need to copy as additional regions here
+			vkCmdCopyBufferToImage(
+				transfer_command_buffer,
+				transfer_src.handle,
+				target.handle,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1, &region // region count, region ptr
+			);
+			// NOTE: if image had mip levels, would need to copy as additional regions here
+			// Note @ A2-env: I'm copying additional regions for each of the 6 layers for cube maps
+		}
 	}
 
 	{ // transition the image memory to shader-read-only-optimal layout [new]

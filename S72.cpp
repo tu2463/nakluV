@@ -1105,10 +1105,15 @@ void S72::process_textures() {
         std::memcpy(texture.pixels.data(), data, pixel_count); // copies the raw pixel bytes from stb_image's buffer into the texture.pixels vector
 
 		if (texture.format == S72::Texture::Format::rgbe) {
+			texture.RGBE_floats.reserve(texture.pixels.size());
 			size_t i = 0;
 			while (i < texture.pixels.size()) {
-				glm::vec4 pixel = glm::vec4(texture.pixels[i], texture.pixels[i + 1], texture.pixels[i + 2], texture.pixels[i + 3]);
-				texture.RGBE_floats.emplace_back(rgbe_to_float(pixel));
+				glm::u8vec4 pixel = glm::u8vec4(texture.pixels[i], texture.pixels[i + 1], texture.pixels[i + 2], texture.pixels[i + 3]);
+				glm::vec3 rgb = rgbe_to_float(pixel);
+				texture.RGBE_floats.push_back(rgb.r);
+				texture.RGBE_floats.push_back(rgb.g);
+				texture.RGBE_floats.push_back(rgb.b);
+				texture.RGBE_floats.push_back(1.0f); // Tutorial::cubemap_format = VK_FORMAT_R32G32B32A32_SFLOAT, so need an alpha channel. A2-env-TODO: check if this is okay
 				i += 4;
 			}
 		}
