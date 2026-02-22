@@ -348,6 +348,13 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 					break;
 				case S72::Texture::Format::linear:
 				case S72::Texture::Format::rgbe:
+					/* Instruction:
+					You must use a pixel format for environment images which can support high dynamic range. 
+					An easy, but wasteful, way to do this is by decoding the images, on-CPU, to VK_FORMAT_R32G32B32A32_SFLOAT (yes, the alpha channel is needed to guarantee GPU support, acc'd to the required format support table). 
+					A more memory-efficient method is to transcode to VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 shared-exponent format or the VK_FORMAT_R16G16B16A16_SFLOAT half-float format; 
+					though you will need to be careful to correctly clamp under- and over-flowing values when translating.
+					*/
+					VK_FORMAT_R32G32B32A32_SFLOAT; // TODO: see if we can use less wasteful format
 				default:
 					format = VK_FORMAT_R8G8B8A8_UNORM;
 					break;

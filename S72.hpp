@@ -209,7 +209,7 @@ struct S72 {
 			flat, //"2D" in the spec, but identifier can't start with a number
 			cube,
 		} type = Type::flat;
-		enum class Format { // understand these formats / colorspaces //??
+		enum class Format { // formats / colorspaces //??
 			linear,
 			srgb,
 			rgbe,
@@ -222,7 +222,8 @@ struct S72 {
 		int width = 0;
 		int height = 0;
 		int channels = 0; // number of channels in the original image
-		std::vector<uint8_t> pixels; // RGBA pixels (always 4 channels after loading)
+		std::vector<uint8_t> pixels; // RGBA pixels (always 4 channels after loading) e.g. [R0, G0, B0, A0, R1, G1, B1, A1] 
+		std::vector<float> RGBE_floats; // for RGBE textures
 	};
 	//we organize textures by src + type + format, so that two materials using to the same image *in the same way* end up referring to the same texture object:
     std::unordered_map< std::string, Texture > textures;

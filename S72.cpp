@@ -1,4 +1,6 @@
 #include "S72.hpp"
+#include "RGBE.hpp"
+
 #include <cassert>
 #include <iostream>
 #include <fstream>
@@ -1080,7 +1082,7 @@ void S72::process_textures() {
 
         std::cout << "Loading texture: " << texture.path << std::endl;
 
-        // Load image using stb_image (always request RGBA = 4 channels)
+        // Load image using stb_image (always RGBA after loading, which is 4 channels)
         int width, height, channels;
         unsigned char* data = stbi_load(texture.path.c_str(), &width, &height, &channels, 4);
 
@@ -1090,18 +1092,26 @@ void S72::process_textures() {
             texture.width = 1;
             texture.height = 1;
             texture.channels = 4;
-            texture.pixels = {255, 0, 255, 255}; // magenta
+            texture.pixels = {255, 0, 255, 255};
             continue;
         }
 
         texture.width = width;
         texture.height = height;
-        texture.channels = channels; // original channels (for debugging)
+        texture.channels = channels;
 
-        // Copy pixel data into vector (stb always gives us RGBA because we requested 4)
         size_t pixel_count = width * height * 4;
         texture.pixels.resize(pixel_count);
-        std::memcpy(texture.pixels.data(), data, pixel_count);
+        std::memcpy(texture.pixels.data(), data, pixel_count); // copies the raw pixel bytes from stb_image's buffer into the texture.pixels vector
+
+		if (texture.format == S72::Texture::Format::rgbe) {
+			size_t i = 0;
+			while (i < texture.pixels.size()) {
+				glm::vec4 pixel = glm::vec4(texture.pixels[i], texture.pixels[i + 1], texture.pixels[i + 2], texture.pixels[i + 3]);
+				texture.RGBE_floats.emplace_back(rgbe_to_float(pixel));
+				i += 4;
+			}
+		}
 
         // Free stb_image allocated memory
         stbi_image_free(data);
