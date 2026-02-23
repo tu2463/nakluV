@@ -13,10 +13,12 @@ layout(set=1, binding=0, std140) readonly buffer Transforms {
 layout(location = 0) in vec3 Position;
 layout(location = 1) in vec3 Normal; // Uppercase variables for attributes (vertex shader stream inputs),
 layout(location = 2) in vec2 TexCoord;
+layout(location = 3) in ?
 
 layout(location = 0) out vec3 position; // lowercase variables for varyings (vertex shader outputs / fragment shader inputs)
 layout(location = 1) out vec3 normal;
 layout(location = 2) out vec2 texCoord;
+layout(location = 3) uniform samplerCube cubeMap; // cubemap texture sampler
 
 void main() {
     gl_Position = TRANSFORMS[gl_InstanceIndex].CLIP_FROM_LOCAL * vec4(Position, 1.0);

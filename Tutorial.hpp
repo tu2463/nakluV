@@ -71,6 +71,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set0_World = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set1_Transforms;
 		VkDescriptorSetLayout set2_TEXTURE;
+		VkDescriptorSetLayout set3_CubeMap;
 
 		// types for descriptors:
 		struct World {
@@ -146,9 +147,11 @@ struct Tutorial : RTG::Application {
 
 	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
 	std::vector< VkImageView > texture_views;
+	VkImageView cubemap_view;
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
+	VkDescriptorSet cubemap_descriptors; // allocated from texture_descriptor_pool; include a descriptor for the cube map
 	std::unordered_map< S72::Texture*, uint32_t > texture_index_map; // maps S72 texture pointers to texture indices
 	std::unordered_map< S72::Material*, uint32_t > material_albedo_map; // maps materials to their albedo texture index
 

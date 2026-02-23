@@ -476,7 +476,11 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				&image_view
 			) );
 
-			texture_views.emplace_back(image_view);
+			if (!cubemap) {
+				texture_views.emplace_back(image_view);
+			} else {
+				cubemap_view = image_view; // A2 write-up specifies that "There is no more than one instance of an Environment object in every scene."
+			}
 		}
 		assert(texture_views.size() == textures.size());
 	}
@@ -512,14 +516,14 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::array< VkDescriptorPoolSize, 1 > pool_sizes{ // tells Vulkan how much memory to reserve in the pool, categorized by type
 			VkDescriptorPoolSize{ // total number of individual descriptors available, categorized by type 
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.descriptorCount = 1 * per_texture, // one descriptor per set, one set per workspace
+				.descriptorCount = per_texture + 1, // 1 texture set per texture + 1 cube map set
 			},
 		};
 
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = 1 * per_texture, // one set per texture; total number of descriptor sets you can allocate from this pool
+			.maxSets = per_texture + 1, // total number of descriptor sets you can allocate from this pool
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(), // total number of individual descriptors available, categorized by type   
 		};
@@ -531,7 +535,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		VkDescriptorSetAllocateInfo alloc_info {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = texture_descriptor_pool,
-			.descriptorSetCount = 1,
+			.descriptorSetCount = 1, // one per texture
 			.pSetLayouts = &objects_pipeline.set2_TEXTURE,
 		};
 		texture_descriptors.assign(textures.size(), VK_NULL_HANDLE);
@@ -567,6 +571,43 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			rtg.device,
 			uint32_t(writes.size()), // descriptorWrites count
 			writes.data(), // descriptorWrites; can I use &writes here //vv No. &writes references to the vector, writes.data() references to the first elem
+			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
+		);
+	}
+
+	{ // allocate and write the cubemap descriptor sets
+		VkDescriptorSetAllocateInfo alloc_info {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = texture_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &objects_pipeline.set3_CubeMap,
+		};
+		VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &cubemap_descriptors) );
+
+		// write descriptors for cube map:
+		VkDescriptorImageInfo cubemap_image_info{
+			.sampler = texture_sampler, //which sampler to use//??								 // how to sample (filtering, wrapping, etc.)
+			.imageView = cubemap_view,							 // which texture image to sample from
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
+		};
+
+		// describe the write operation:
+		std::array<VkWriteDescriptorSet, 1> writes{
+			VkWriteDescriptorSet{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = cubemap_descriptors, // which descriptor set to update      
+				.dstBinding = 0, // binding index within that set (matches layout)
+				.dstArrayElement = 0, // starting array index (for arrayed bindings) 
+				.descriptorCount = 1, // updating 1 descriptor  
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set3_CubeMap) 
+				.pImageInfo = &cubemap_image_info,
+			},
+		};
+
+		vkUpdateDescriptorSets(
+			rtg.device,
+			uint32_t(writes.size()), // descriptorWrites count
+			writes.data(), // descriptorWrites
 			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
 		);
 	}

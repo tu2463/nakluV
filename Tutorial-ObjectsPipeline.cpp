@@ -73,14 +73,34 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set2_TEXTURE) );
 	}
 
-	{ // create pipeline layout; why do we need blocks like this in C++ //??
-		std::array< VkDescriptorSetLayout, 3 > layouts{
+	{ // the set3_CubeMap layout has a single descriptor for a samplerCube used in the fragment shader:
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // because a GLSL samplerCube also references both an image and the parameters for how to sample from that image.
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT // fragment stage
+			},
+		};
+
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set3_CubeMap) );
+	}
+
+	{ // create pipeline layout; why do we need blocks like this in C++ //vv simple syntax
+		std::array< VkDescriptorSetLayout, 4 > layouts{
 			set0_World,
 			set1_Transforms,
 			set2_TEXTURE,
+			set3_CubeMap,
 		};
 		
-		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //??
+		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //vv
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 			.setLayoutCount = uint32_t(layouts.size()),
 			.pSetLayouts = layouts.data(),
@@ -217,6 +237,11 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set2_TEXTURE != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set2_TEXTURE, nullptr);
 		set2_TEXTURE = VK_NULL_HANDLE;
+	}
+
+	if (set3_CubeMap != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set3_CubeMap, nullptr);
+		set3_CubeMap = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {
