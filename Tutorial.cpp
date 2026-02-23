@@ -354,7 +354,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 					format = VK_FORMAT_R8G8B8A8_SRGB;
 					break;
 				case S72::Texture::Format::linear:
-					// format = VK_FORMAT_R8G8B8A8_UNORM; // A2-env-TODO check: what format should this be?
+					format = VK_FORMAT_R8G8B8A8_UNORM; // A2-env-TODO check: what format should this be?
 					break;
 				case S72::Texture::Format::rgbe:
 					data = s72_texture.RGBE_floats.data();
@@ -448,6 +448,28 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::cout << "Mapped " << material_albedo_map.size() << " materials to texture indices." << std::endl;
 	}
 
+	{ // create 1x1 black cubemap if no environment cubemap exists in the scene
+		bool has_cubemap = std::any_of(textures.begin(), textures.end(), [this](Helpers::AllocatedImage const &img) { // A2-env-TODO: def needs to be optmized...
+			return img.format == cubemap_format;
+		});
+		if (!has_cubemap) {
+			std::vector<float> black(6 * 1 * 1 * 4, 0.0f); // 6 faces x 1x1 pixel x 4 floats
+			uint32_t size = 1;
+			
+			textures.emplace_back(rtg.helpers.create_image(
+				VkExtent2D{.width = size, .height = size},
+				cubemap_format,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				Helpers::Unmapped,
+				VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+				6
+			));
+			rtg.helpers.transfer_to_image(black.data(), black.size() * sizeof(float), textures.back(), 6);
+		}
+	}
+
 	{ // make image views for each texture image
 		for (Helpers::AllocatedImage const &image : textures) {
 			// An image view describes how to access an image — Vulkan requires you to create a view before you can use an image in a shader or pipeline.
@@ -476,14 +498,14 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				&image_view
 			) );
 
-			if (!cubemap) {
+			if (!is_cubemap) {
 				texture_views.emplace_back(image_view);
 			} else {
-				assert(cubemap_view != VK_NULL_HANDLE);
-				cubemap_view = image_view; // A2 write-up specifies that "There is no more than one instance of an Environment object in every scene."
+				assert(cubemap_view == VK_NULL_HANDLE); // A2 write-up specifies that "There is no more than one instance of an Environment object in every scene."
+				cubemap_view = image_view;
 			}
 		}
-		assert(texture_views.size() == textures.size());
+		assert(texture_views.size() + (cubemap_view != VK_NULL_HANDLE ? 1 : 0) == textures.size());
 	}
 
 	{ // make a sampler for the textures
@@ -539,18 +561,19 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			.descriptorSetCount = 1, // one per texture
 			.pSetLayouts = &objects_pipeline.set2_TEXTURE,
 		};
-		texture_descriptors.assign(textures.size(), VK_NULL_HANDLE);
+		texture_descriptors.assign(texture_views.size(), VK_NULL_HANDLE); // originally textures.size(), used texture_views cuz need to get rid of cubemap 
 
 		for (VkDescriptorSet &descriptor_set : texture_descriptors) {
 			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptor_set) );
 		}
 
 		// write descriptors for textures:
-		std::vector< VkDescriptorImageInfo > infos(textures.size());
-		std::vector< VkWriteDescriptorSet > writes(textures.size());
+		std::vector< VkDescriptorImageInfo > infos(texture_views.size());
+		std::vector< VkWriteDescriptorSet > writes(texture_views.size());
 
+		size_t i = 0;
 		for (Helpers::AllocatedImage const &image : textures) {
-			size_t i = &image - &textures[0];
+			if (image.format == cubemap_format) continue; // skip cubemap //A2-env-TODO: maybe I should not save the cubemap material at the same place as the other texture_views... it's causing too much problem
 
 			infos[i] = VkDescriptorImageInfo{
 				.sampler = texture_sampler, // how to sample (filtering, wrapping, etc.)    
@@ -566,6 +589,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
 				.pImageInfo = &infos[i],
 			};
+			i++;
 		}
 
 		vkUpdateDescriptorSets(
@@ -576,7 +600,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		);
 	}
 
-	{ // allocate and write the cubemap descriptor sets
+	if (cubemap_view != VK_NULL_HANDLE) { // allocate and write the cubemap descriptor sets
 		VkDescriptorSetAllocateInfo alloc_info {
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = texture_descriptor_pool,
@@ -639,6 +663,11 @@ Tutorial::~Tutorial() {
 		view = VK_NULL_HANDLE;
 	}
 	texture_views.clear();
+
+	if (cubemap_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, cubemap_view, nullptr);
+		cubemap_view = VK_NULL_HANDLE;
+	}
 
 	for (auto &texture : textures) {
 		rtg.helpers.destroy_image(std::move(texture));
@@ -1262,6 +1291,16 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		// - Now you switch to the objects pipeline with vkCmdBindPipeline
 		// - You don't need to rebind the camera descriptor set!
 
+		// bind cubemap descriptor set
+		vkCmdBindDescriptorSets(
+			workspace.command_buffer,			   // command buffer
+			VK_PIPELINE_BIND_POINT_GRAPHICS,	   // pipeline bind point
+			objects_pipeline.layout,			   // pipeline layout
+			3,									   // set number (slot 3)
+			1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
+			0, nullptr							   // dynamic offsets count, ptr
+		);
+
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
 			{ // push material_type:
@@ -1490,16 +1529,16 @@ void Tutorial::evaluate_driver(S72::Driver& driver, float time) {
 }
 
 void Tutorial::update(float dt) {
-	// FPS tracking
-	fps_accumulator += dt;
-	fps_frame_count++;
-	if (fps_accumulator >= 1.0f) {
-		float fps = fps_frame_count / fps_accumulator;
-		float ms_per_frame = (fps_accumulator / fps_frame_count) * 1000.0f;
-		std::cout << "FPS: " << fps << " (" << ms_per_frame << " ms/frame)" << std::endl;
-		fps_accumulator = 0.0f;
-		fps_frame_count = 0;
-	}
+	// FPS tracking //A1-test-TODO: enable them when specified --debug
+	// fps_accumulator += dt;
+	// fps_frame_count++;
+	// if (fps_accumulator >= 1.0f) {
+	// 	float fps = fps_frame_count / fps_accumulator;
+	// 	float ms_per_frame = (fps_accumulator / fps_frame_count) * 1000.0f;
+	// 	std::cout << "FPS: " << fps << " (" << ms_per_frame << " ms/frame)" << std::endl;
+	// 	fps_accumulator = 0.0f;
+	// 	fps_frame_count = 0;
+	// }
 
 	time  = std::fmod(time + dt, 60.0f);
 	if (animation_playing) {
@@ -1658,15 +1697,14 @@ void Tutorial::update(float dt) {
 					}
 				}
 
-				S72::Material* mat = material_albedo_map[tex_index];
 				ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
-				if (std::holds_alternative<S72::Material::PBR>(mesh->material->brdf)) { // checks if a std::variant currently holds a specific alternative type
+				if (std::holds_alternative<S72::Material::PBR>(node->mesh->material->brdf)) { // checks if a std::variant currently holds a specific alternative type
 					material_type = ObjectsPipeline::MaterialType::PBR;
-				} else if (std::holds_alternative<S72::Material::Lambertian>(mesh->material->brdf)) {
+				} else if (std::holds_alternative<S72::Material::Lambertian>(node->mesh->material->brdf)) {
 					material_type = ObjectsPipeline::MaterialType::Lambertian;
-				} else if (std::holds_alternative<S72::Material::Mirror>(mesh->material->brdf)) {
+				} else if (std::holds_alternative<S72::Material::Mirror>(node->mesh->material->brdf)) {
 					material_type = ObjectsPipeline::MaterialType::Mirror;
-				} else if (std::holds_alternative<S72::Material::Environment>(mesh->material->brdf)) {
+				} else if (std::holds_alternative<S72::Material::Environment>(node->mesh->material->brdf)) {
 					material_type = ObjectsPipeline::MaterialType::Environment;
 				}
 

@@ -236,7 +236,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	// check data is the right size [new]
 	size_t bytes_per_block = vkuFormatTexelBlockSize(target.format);
 	size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
-	assert(size == target.extent.width * target.extent.height * bytes_per_block / texels_per_block);
+	assert(size == target.extent.width * target.extent.height * layerCount * bytes_per_block / texels_per_block);
 
 	// create a host-coherent source buffer
 	AllocatedBuffer transfer_src = create_buffer(
