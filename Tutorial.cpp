@@ -561,35 +561,36 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			.descriptorSetCount = 1, // one per texture
 			.pSetLayouts = &objects_pipeline.set2_TEXTURE,
 		};
-		texture_descriptors.assign(texture_views.size(), VK_NULL_HANDLE); // originally textures.size(), used texture_views cuz need to get rid of cubemap 
+		texture_descriptors.assign(textures.size(), VK_NULL_HANDLE);
 
-		for (VkDescriptorSet &descriptor_set : texture_descriptors) {
-			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptor_set) );
+		for (size_t i = 0; i < textures.size(); i++) {
+			if (textures[i].format == cubemap_format) continue; // no set2 descriptor for the cubemap
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &texture_descriptors[i]) );
 		}
 
 		// write descriptors for textures:
 		std::vector< VkDescriptorImageInfo > infos(texture_views.size());
 		std::vector< VkWriteDescriptorSet > writes(texture_views.size());
 
-		size_t i = 0;
-		for (Helpers::AllocatedImage const &image : textures) {
-			if (image.format == cubemap_format) continue; // skip cubemap //A2-env-TODO: maybe I should not save the cubemap material at the same place as the other texture_views... it's causing too much problem
+		size_t view_i = 0;
+		for (size_t tex_i = 0; tex_i < textures.size(); tex_i++) {
+			if (textures[tex_i].format == cubemap_format) continue; // skip cubemap; //A2-env-TODO: maybe I should not save the cubemap material at the same place as the other texture_views... it's causing too much problem
 
-			infos[i] = VkDescriptorImageInfo{
-				.sampler = texture_sampler, // how to sample (filtering, wrapping, etc.)    
-				.imageView = texture_views[i], // which texture image to sample from
-				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access 
+			infos[view_i] = VkDescriptorImageInfo{
+				.sampler = texture_sampler,// how to sample (filtering, wrapping, etc.) 
+				.imageView = texture_views[view_i], // which texture image to sample from; view_i tracks position in texture_views
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
 			};
-			writes[i] = VkWriteDescriptorSet{
+			writes[view_i] = VkWriteDescriptorSet{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				.dstSet = texture_descriptors[i], // which descriptor set to update      
-				.dstBinding = 0, // binding index within that set (matches layout)
-				.dstArrayElement = 0, // starting array index (for arrayed bindings) 
-				.descriptorCount = 1, // updating 1 descriptor  
+				.dstSet = texture_descriptors[tex_i], // which descriptor set to update; tex_i is the textures index (matches inst.texture)
+				.dstBinding = 0,// binding index within that set (matches layout)
+				.dstArrayElement = 0,// starting array index (for arrayed bindings) 
+				.descriptorCount = 1,// updating 1 descriptor
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.pImageInfo = &infos[i],
+				.pImageInfo = &infos[view_i],
 			};
-			i++;
+			view_i++;
 		}
 
 		vkUpdateDescriptorSets(
@@ -1291,15 +1292,17 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		// - Now you switch to the objects pipeline with vkCmdBindPipeline
 		// - You don't need to rebind the camera descriptor set!
 
-		// bind cubemap descriptor set
-		vkCmdBindDescriptorSets(
-			workspace.command_buffer,			   // command buffer
-			VK_PIPELINE_BIND_POINT_GRAPHICS,	   // pipeline bind point
-			objects_pipeline.layout,			   // pipeline layout
-			3,									   // set number (slot 3)
-			1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
-			0, nullptr							   // dynamic offsets count, ptr
-		);
+		// bind cubemap descriptor set (only when a cubemap exists in the scene)
+		if (cubemap_view != VK_NULL_HANDLE) {
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer,			   // command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS,	   // pipeline bind point
+				objects_pipeline.layout,			   // pipeline layout
+				3,									   // set number (slot 3)
+				1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
+				0, nullptr							   // dynamic offsets count, ptr
+			);
+		}
 
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
