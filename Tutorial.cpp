@@ -479,6 +479,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			if (!cubemap) {
 				texture_views.emplace_back(image_view);
 			} else {
+				assert(cubemap_view != VK_NULL_HANDLE);
 				cubemap_view = image_view; // A2 write-up specifies that "There is no more than one instance of an Environment object in every scene."
 			}
 		}
@@ -1227,7 +1228,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 	if (!object_instances.empty()) { // draw with the objects pipeline
 		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, objects_pipeline.handle);
-
+		
 		{// use object vertices (offset 0) as vertex buffer binding 0: // what does offset 0. and vertex buffer binding mean //vv The shader expects vertex data at binding 0. When you call vkCmdBindVertexBuffers(..., 0, ...), you're saying "attach this buffer to binding 0." 
 			std::array< VkBuffer, 1 > vertex_buffers{ object_vertices.handle };
 			std::array< VkDeviceSize, 1 > offsets{ 0 }; // tells Where in that buffer the data starts 
@@ -1263,6 +1264,13 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
+			{ // push material_type:
+				ObjectsPipeline::Push push{
+					.material_type = inst.material_type,
+				};
+				vkCmdPushConstants(workspace.command_buffer, objects_pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+			}
+
 			if (culling_mode == CullingMode::Frustum){
 				// Get local-space bounding box corners
 				S72::vec3 const &bmin = inst.mesh->bbox_min;
@@ -1650,10 +1658,23 @@ void Tutorial::update(float dt) {
 					}
 				}
 
+				S72::Material* mat = material_albedo_map[tex_index];
+				ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
+				if (std::holds_alternative<S72::Material::PBR>(mesh->material->brdf)) { // checks if a std::variant currently holds a specific alternative type
+					material_type = ObjectsPipeline::MaterialType::PBR;
+				} else if (std::holds_alternative<S72::Material::Lambertian>(mesh->material->brdf)) {
+					material_type = ObjectsPipeline::MaterialType::Lambertian;
+				} else if (std::holds_alternative<S72::Material::Mirror>(mesh->material->brdf)) {
+					material_type = ObjectsPipeline::MaterialType::Mirror;
+				} else if (std::holds_alternative<S72::Material::Environment>(mesh->material->brdf)) {
+					material_type = ObjectsPipeline::MaterialType::Environment;
+				}
+
 				object_instances.emplace_back(ObjectInstance{
 					.mesh = node->mesh,
 					.transform = tf,
 					.texture = tex_index,
+					.material_type = material_type,
 				});
 			}
 
@@ -1707,6 +1728,10 @@ void Tutorial::update(float dt) {
 			// p_camera = CAMERA_FROM_WORLD * p_world
 			CAMERA_FROM_WORLD = inverse(camera.WORLD_FROM_LOCAL);
 			CLIP_FROM_WORLD_CULLING = CLIP_FROM_WORLD;
+
+			world.EYE.x = camera.WORLD_FROM_LOCAL[12]; // we only need the translation col for EYE //??
+			world.EYE.y = camera.WORLD_FROM_LOCAL[13];
+			world.EYE.z = camera.WORLD_FROM_LOCAL[14];
 		}
 	} else if (camera_mode == CameraMode::User) { //??
 		CAMERA_FROM_WORLD = orbit(
@@ -1731,30 +1756,42 @@ void Tutorial::update(float dt) {
 		};
 
 		CLIP_FROM_WORLD_CULLING = CLIP_FROM_WORLD;
-	} else if (camera_mode == CameraMode::Debug) {
+
+		mat4 WORLD_FROM_LOCAL = inverse(CAMERA_FROM_WORLD);
+		world.EYE.x = WORLD_FROM_LOCAL[12];
+		world.EYE.y = WORLD_FROM_LOCAL[13];
+		world.EYE.z = WORLD_FROM_LOCAL[14];
+	} else if (camera_mode == CameraMode::Debug)
+	{
 		// the rendering happens through a second user-controlled camera
+		CAMERA_FROM_WORLD = orbit(
+			debug_camera.target_x, debug_camera.target_y, debug_camera.target_z,
+			debug_camera.azimuth, debug_camera.elevation, debug_camera.radius
+		);
+
 		CLIP_FROM_WORLD = perspective(
 			debug_camera.fov,
 			rtg.swapchain_extent.width / float(rtg.swapchain_extent.height), //aspect
 			debug_camera.near,
 			debug_camera.far
-		) * orbit(
-			debug_camera.target_x, debug_camera.target_y, debug_camera.target_z,
-			debug_camera.azimuth, debug_camera.elevation, debug_camera.radius
-		);
+		) * CAMERA_FROM_WORLD;
+
+		mat4 WORLD_FROM_LOCAL = inverse(CAMERA_FROM_WORLD);
+		world.EYE.x = WORLD_FROM_LOCAL[12];
+		world.EYE.y = WORLD_FROM_LOCAL[13];
+		world.EYE.z = WORLD_FROM_LOCAL[14];
 
 		// the culling happens for the previously-active camera (this is very useful for debugging culling). When using the debug  camera, your renderer should display object bounding boxes and camera frustums using lines.
 		// Draw frustum for the culling camera (previously-active camera)
 		mat4 WORLD_FROM_CLIP = inverse(CLIP_FROM_WORLD_CULLING);
 
-		// Helper: transform clip-space point to world-space
 		auto clip_to_world = [&](float cx, float cy, float cz) -> vec3 {
 			vec4 clip = {cx, cy, cz, 1.0f};
 			vec4 world = WORLD_FROM_CLIP * clip;
 			return vec3{world[0]/world[3], world[1]/world[3], world[2]/world[3]}; // perspective divide
 		};
 
-		// 8 corners in clip space (Vulkan: z from 0 to 1)
+		// 8 corners in clip space (z from 0 to 1)
 		vec3 nbl = clip_to_world(-1, -1, 0); // near bottom-left
 		vec3 nbr = clip_to_world(+1, -1, 0); // near bottom-right
 		vec3 ntr = clip_to_world(+1, +1, 0); // near top-right
@@ -1788,7 +1825,6 @@ void Tutorial::update(float dt) {
 			S72::vec3 const &bmin = inst.mesh->bbox_min;
 			S72::vec3 const &bmax = inst.mesh->bbox_max;
 
-			// Helper to transform local point to world space
 			auto local_to_world = [&](float lx, float ly, float lz) -> vec3 {
 				vec4 local = {lx, ly, lz, 1.0f};
 				vec4 world_pt = inst.transform.WORLD_FROM_LOCAL * local;
@@ -1822,81 +1858,33 @@ void Tutorial::update(float dt) {
 			push_edge(c110, c111, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
 			push_edge(c010, c011, 0x00,0xff,0xff,0xff, 0x00,0xff,0xff,0xff);
 		}
-
-	} else {
+	}
+	else
+	{
 		assert(0 && "only three camera modes");
 	}
 
 	{ // static sun and sky
-		// Direction: (0, 0, 1) — pointing straight up along the Z-axis 
+		// pointing straight up along the Z-axis
 		world.SKY_DIRECTION.x = 0.0f;
 		world.SKY_DIRECTION.y = 0.0f;
 		world.SKY_DIRECTION.z = 1.0f;
 
-		// Energy: (0.1, 0.1, 0.2) — a dim, slightly blue tint (the blue channel is twice as strong as red/green)    
+		// dim, slightly blue
 		world.SKY_ENERGY.r = 0.1f;
 		world.SKY_ENERGY.g = 0.1f;
 		world.SKY_ENERGY.b = 0.2f;
 
-		// Direction: (6/23, 13/23, 18/23) ≈ (0.26, 0.57, 0.78) — a normalized vector pointing roughly up and to the side
+		// Direction: (6/23, 13/23, 18/23) ≈ (0.26, 0.57, 0.78) - roughly up and to the side
 		world.SUN_DIRECTION.x = 6.0f / 23.0f;
 		world.SUN_DIRECTION.y = 13.0f / 23.0f;
 		world.SUN_DIRECTION.z = 18.0f / 23.0f;
 
-		// Energy: (1.0, 1.0, 0.9) — bright white with a slight warm/yellow tint (red and green at full, blue slightly reduced)  
+		// almost bright white
 		world.SUN_ENERGY.r = 1.0f;
 		world.SUN_ENERGY.g = 1.0f;
 		world.SUN_ENERGY.b = 0.9f;
 	}
-
-	// { // 4 triangular pyramids (wireframe tetrahedra) using your vec3; rotation stays whatever you already do in your transform
-	// 	// lines_vertices.clear();
-
-	// 	constexpr uint32_t pyramids = 4;
-	// 	constexpr size_t edges_per_pyramid = 6;
-	// 	constexpr size_t count = pyramids * edges_per_pyramid * 2; // 6 edges * 2 verts per edge * 4 pyramids
-	// 	lines_vertices.reserve(count);
-
-	// 	auto push_tetra = [&](vec3 center, float s,
-	// 						// color per vertex (apex, base1, base2, base3)
-	// 						uint8_t c0r, uint8_t c0g, uint8_t c0b, uint8_t c0a,
-	// 						uint8_t c1r, uint8_t c1g, uint8_t c1b, uint8_t c1a,
-	// 						uint8_t c2r, uint8_t c2g, uint8_t c2b, uint8_t c2a,
-	// 						uint8_t c3r, uint8_t c3g, uint8_t c3b, uint8_t c3a) {
-
-	// 		// Local tetra vertices (triangular pyramid), then translate by center:
-	// 		vec3 A = center + vec3{ 0.0f,  0.75f,  0.0f} * s; // apex
-	// 		vec3 B = center + vec3{-0.65f, -0.375f, -0.45f} * s; // base v1
-	// 		vec3 C = center + vec3{ 0.65f, -0.375f, -0.45f} * s; // base v2
-	// 		vec3 D = center + vec3{ 0.0f, -0.375f,  0.75f} * s; // base v3
-
-	// 		// 6 edges:
-	// 		push_edge(A, B, c0r,c0g,c0b,c0a, c1r,c1g,c1b,c1a);
-	// 		push_edge(A, C, c0r,c0g,c0b,c0a, c2r,c2g,c2b,c2a);
-	// 		push_edge(A, D, c0r,c0g,c0b,c0a, c3r,c3g,c3b,c3a);
-
-	// 		push_edge(B, C, c1r,c1g,c1b,c1a, c2r,c2g,c2b,c2a);
-	// 		push_edge(C, D, c2r,c2g,c2b,c2a, c3r,c3g,c3b,c3a);
-	// 		push_edge(D, B, c3r,c3g,c3b,c3a, c1r,c1g,c1b,c1a);
-	// 	};
-
-	// 	const float s = 0.35f; // pyramid size
-
-	// 	// Arrange 4 pyramids in a 2x2 layout with varying z for depth parallax.
-	// 	push_tetra(vec3{-0.45f,  0.35f, 0.25f}, s,
-	// 			0xff,0x44,0x44,0xff,  0xff,0xff,0x00,0xff,  0x00,0xff,0x88,0xff,  0x44,0x88,0xff,0xff);
-
-	// 	push_tetra(vec3{ 0.45f,  0.35f, 0.55f}, s,
-	// 			0xff,0x88,0x00,0xff,  0xff,0xff,0xff,0xff,  0x88,0x00,0xff,0xff,  0x00,0xaa,0xff,0xff);
-
-	// 	push_tetra(vec3{-0.45f, -0.35f, 0.45f}, s,
-	// 			0x00,0xff,0xff,0xff,  0xff,0x00,0xaa,0xff,  0xaa,0xff,0x00,0xff,  0xff,0xaa,0x00,0xff);
-
-	// 	push_tetra(vec3{ 0.45f, -0.35f, 0.15f}, s,
-	// 			0x88,0xff,0x88,0xff,  0x00,0x00,0xff,0xff,  0xff,0x00,0x00,0xff,  0x88,0x88,0x88,0xff);
-
-	// 	// assert(lines_vertices.size() == count);
-	// }
 }
 
 

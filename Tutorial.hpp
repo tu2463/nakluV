@@ -79,8 +79,9 @@ struct Tutorial : RTG::Application {
 			struct { float r, g, b, padding_; } SKY_ENERGY;
 			struct { float x, y, z, padding_; } SUN_DIRECTION;
 			struct { float r, g, b, padding_; } SUN_ENERGY;
+			struct { float x, y, z, padding_; } EYE; // camera pos in world space
 		};
-		static_assert(sizeof(World) == 4*4 + 4*4 + 4*4 + 4*4, "World is the expected size.");
+		static_assert(sizeof(World) == 4*4 + 4*4 + 4*4 + 4*4 + 4*4, "World is the expected size.");
 
 		struct Transform {
 			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space, for gl_Position
@@ -89,7 +90,17 @@ struct Tutorial : RTG::Application {
 		};
 		static_assert(sizeof(Transform) == 16*4 + 16*4 + 16*4, "Transform is the expected size.");
 
-		// no push constants
+		enum class MaterialType {
+			PBR = 0,
+			Lambertian = 1,
+			Mirror = 2,
+			Environment = 3,
+		};
+		// push constants
+		struct Push
+		{
+			MaterialType material_type = MaterialType::Lambertian;
+		};
 
 		VkPipelineLayout layout = VK_NULL_HANDLE;
 		
@@ -147,7 +158,7 @@ struct Tutorial : RTG::Application {
 
 	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
 	std::vector< VkImageView > texture_views;
-	VkImageView cubemap_view;
+	VkImageView cubemap_view = VK_NULL_HANDLE;
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
@@ -244,7 +255,7 @@ struct Tutorial : RTG::Application {
 		float far = 1000.0f; // far clipping plane
 	} free_camera;
 
-	OrbitCamera debug_camera; // TODO: increase usefulness by etting the debug camera to a position that can see the whole scene
+	OrbitCamera debug_camera; // TODO: increase usefulness by setting the debug camera to a position that can see the whole scene
 	// std::variant< SceneCamera, OrbitCamera > culling_camera = free_camera; // previously active camera // FIXED-BUG: can't save a pointer to 2 types, so save the prev mode and mode and CLIP_FROM_WORLD to compute fructum
   	
 	//computed from the current camera (as set by camera_mode) during update():
@@ -261,7 +272,9 @@ struct Tutorial : RTG::Application {
 		S72::Mesh *mesh; // reference to the mesh data for this object, which includes the vertex count and first vertex index into the pooled buffer
 		ObjectsPipeline::Transform transform;
 		uint32_t texture = 0;
+		ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
 	};
+	
 	std::vector< ObjectInstance > object_instances;
 
 	std::vector< S72::Mesh > s72_meshes;

@@ -18,14 +18,14 @@ void Tutorial::BackgroundPipeline::create(RTG &rtg, VkRenderPass render_pass, ui
 
 	// refsol::BackgroundPipeline_create(rtg, render_pass, subpass, vert_module, frag_module, &layout, &handle);
 
-	{ // create pipeline layout; why do we need blocks like this in C++ //??
+	{ // create pipeline layout; why do we need blocks like this in C++ //vv
 		VkPushConstantRange range{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			.offset = 0,
 			.size = sizeof(Push),
 		};
 
-		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //??
+		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //vv
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 			.setLayoutCount = 0,
 			.pSetLayouts = nullptr,
@@ -68,7 +68,7 @@ void Tutorial::BackgroundPipeline::create(RTG &rtg, VkRenderPass render_pass, ui
 		VkPipelineVertexInputStateCreateInfo vertex_input_state{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			.vertexBindingDescriptionCount = 0,
-			.pVertexBindingDescriptions = nullptr, //?? when are these null ptrs set? what's the meaning of the 'p' in the attr name?
+			.pVertexBindingDescriptions = nullptr, // when are these null ptrs set//?? what's the meaning of the 'p' in the attr name //vv pointer
 			.vertexAttributeDescriptionCount = 0,
 			.pVertexAttributeDescriptions = nullptr,
 		};

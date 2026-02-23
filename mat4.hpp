@@ -26,7 +26,7 @@ inline vec3& operator*=(vec3& a, float s) { a[0] *= s; a[1] *= s; a[2] *= s; ret
 inline float length(vec3 v) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
 inline float dot(vec3 a, vec3 b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean //vv what does the syntax "operator*" mean //??
+inline vec4 operator*(mat4 const &A, vec4 const &b) { // what does "inline" mean //vv what does the syntax "operator*" mean //vv
     vec4 ret;
     // compute ret = A * b
     for (uint32_t r = 0; r < 4; ++r) {
