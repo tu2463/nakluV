@@ -19,7 +19,6 @@ struct S72 {
     static S72 load(std::string const &file);
     void process_meshes(); // extract vertices from binary data into pooled buffer
     void process_textures(); // load texture images from disk using stb_image
-    void process_drivers();
 
     // Pooled vertex data (populated by process_meshes):
     std::vector<PosNorTexTanVertex> vertices;
@@ -207,7 +206,7 @@ struct S72 {
 		std::string src; //src used in the s72 file
 		enum class Type {
 			flat, //"2D" in the spec, but identifier can't start with a number
-			cube,
+			cube, //A2-env-TODO: just noticed that there's a cube type here. i might ve been using Format::rgbe the whole time, maybe using Type::cube makes more sense
 		} type = Type::flat;
 		enum class Format { // formats / colorspaces //??
 			linear,
@@ -227,6 +226,7 @@ struct S72 {
 	};
 	//we organize textures by src + type + format, so that two materials using to the same image *in the same way* end up referring to the same texture object:
     std::unordered_map< std::string, Texture > textures;
+    Texture *env_radiance_texture = nullptr;
 
     /* zero or more "MATERIAL"s, all with unique names:
     {
@@ -288,7 +288,7 @@ struct S72 {
     {
         "type":"ENVIRONMENT",
         "name":"sky",
-        "radiance": {"src":"sky.png", "type":"cube", "format":"rgbe"}
+        "radiance": {"src":"sky.png", "type":"cube", "format":"rgbe"} // cube map texture giving radiance (in watts per steradian per square meter in each spectral band) incoming from the environment.
     },
     */
     struct Environment{

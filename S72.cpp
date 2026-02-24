@@ -858,6 +858,7 @@ S72 S72::load(std::string const &scene_file) {
 			if (environment.radiance->type != Texture::Type::cube) {
 				throw std::runtime_error("Environment \"" + name + "\"'s radiance is not a cube.");
 			}
+			s72.env_radiance_texture = environment.radiance;
         }  else if (type == "LIGHT") {
             Light &light = s72.lights[name];
 
@@ -974,10 +975,9 @@ S72 S72::load(std::string const &scene_file) {
             throw std::runtime_error("Unknown object type"); // std::runtime_error is appropriate for this case — it's the standard exception for errors detectable only at runtime
         }
     }
+	if (!s72.env_radiance_texture) std::cout << "No cubemap found" << std::endl;
 
-    //-----------------------------------------------------------------------
-	//fix up paths for Datafiles and Textures to be relative to the s72 file
-
+	//fix paths for Datafiles and Textures to be relative to the s72 file
 	std::string scene_folder = "";
 	{ //extract prefix for relative paths:
 		auto pos = scene_file.find_last_of("\\/");
@@ -986,22 +986,17 @@ S72 S72::load(std::string const &scene_file) {
 		}
 	}
 
-	//data files are just empty objects, but in a map with keys = src:
 	for (auto &[key, value] : s72.data_files) {
 		value.src = key;
 		value.path = scene_folder + value.src;
 	}
 
-	//textures are already populated with src, type, format; just need to set path:
 	for (auto &[key, value] : s72.textures) {
 		value.path = scene_folder + value.src;
 	}
 
-    //-----------------------------------------------------------------------
-    // load the DataFiles from disk in binary mode
-
+    // load the DataFiles from disk in binary mode //?? Credit: Zulip discussions https://15-472-s26.zulipchat.com/#narrow/channel/560762-C.2B.2B/topic/Reading.20A.20File/with/572892122
     for (auto &[key, data_file] : s72.data_files) {
-        // TODO: understand the read binary file into memory process
         // Open file in binary mode, positioned at end (ate) to get size
         std::ifstream file(data_file.path, std::ios::binary | std::ios::ate); // open, cursor at end 
         if (!file) {
@@ -1024,7 +1019,7 @@ S72 S72::load(std::string const &scene_file) {
 	return s72; // the loaded scene
 }
 
-// Helper to read floats from a byte pointer
+// read floats from a byte pointer
 inline float read_float(uint8_t const *ptr) {
     return *reinterpret_cast<float const*>(ptr);
 }
@@ -1104,7 +1099,8 @@ void S72::process_textures() {
         texture.pixels.resize(pixel_count);
         std::memcpy(texture.pixels.data(), data, pixel_count); // copies the raw pixel bytes from stb_image's buffer into the texture.pixels vector
 
-		if (texture.format == S72::Texture::Format::rgbe) {
+		if (texture.type == S72::Texture::Type::cube) {
+			assert(texture.format == S72::Texture::Format::rgbe);
 			texture.RGBE_floats.reserve(texture.pixels.size());
 			size_t i = 0;
 			while (i < texture.pixels.size()) {

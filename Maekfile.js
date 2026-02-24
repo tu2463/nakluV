@@ -62,6 +62,27 @@ const objects_shaders = [
 ];
 main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[...objects_shaders] } ) );
 
+// -- A2-diffuse cube util --
+// Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
+//(common_objs is the object files used by both the cube utility and the viewer; in my case, RTG, Helpers, stb_image, stb_image_write)
+common_objs = [];
+
+const cube_objs = [
+    maek.CPP('main-cube.cpp'),
+    ...common_objs,
+];
+
+//I handle cube utility shaders the same as my viewer's shaders / *Pipeline.cpp files:
+// const cube_shaders = [
+//     maek.GLSLC('cube.comp', 'spv/cube.comp.lambertian', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DLAMBERTIAN'] } ),
+//     maek.GLSLC('cube.comp', 'spv/cube.comp.ggx', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DGGX'] } ),
+// ];
+// cube_objs.push( maek.CPP('CubePipeline.cpp', undefined, { depends:[...cube_shaders] } ) );
+
+//and link the executable in the same way as the viewer:
+const cube_exe = maek.LINK([...cube_objs], 'bin/cube');
+
+// -- 
 // const prebuilt_objs = [ ];
 
 // //use the prebuilt refsol.o unless refsol.cpp exists:
@@ -78,7 +99,7 @@ main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[.
 const main_exe = maek.LINK([...main_objs], 'bin/main');
 
 //default targets:
-maek.TARGETS = [main_exe];
+maek.TARGETS = [main_exe, cube_exe];
 
 //- - - - - - - - - - - - - - - - - - - - -
 function custom_flags_and_rules() {
