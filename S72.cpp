@@ -146,22 +146,29 @@ void warn_on_unhandled(std::map< std::string, sejp::value > &object, std::string
 // the extract_... functions are for required fields. they throw an error if the key doesn't exist, and they also delete the field from the object, so that we can check for unhandled fields at the end of parsing each object by seeing if any fields remain in the object after parsing
 // EXCEPTION: extract_map is for optional fields; it's like bundling the for loop and does more work. Also because we need to call extrac_map twice, so it's a clean refactor.
 
-//pull out a string property of a sejp object as a string.
-    // throws if the property is missing
-    // deletes property from the object and returns the value if all is well
-// The underscore distinguishes the raw pointer parameter from the nicer reference object created later in this fn
+
+// Extracts a string property from a parsed JSON object
+// Usage: std::string src = extract_string(&obj, "src", "Mesh \"" + name + "\"'s indices.src");
 std::string extract_string(std::map< std::string, sejp::value > *object_, std::string const &key, std::string const &what) {
+	// The underscore in object_ distinguishes the raw pointer parameter from the nicer reference object created later in this fn
     assert(object_);
+	// e.g. an "indices" object may be: { "src":"cube.b72", "offset":576, "format":"UINT32" }
     auto &object = *object_;
 
     std::string string;
     try {
+		// pull out a string property of a sejp object as a string.
+		// e.g. if key=src, this will look for cube.b72
         string = object.at(key).as_string().value();
     } catch(std::exception &) {
+    	// throws if the property is missing
         throw std::runtime_error(what + " is missing or not a string");
     }
+
+    // deletes property from the object and returns the value if all is well
+	// e.g. object will become  { "offset":576, "format":"UINT32" }
     object.erase(object.find(key));
-    return string;
+    return string; // return cube.b72
 }
 
 //pull out a number property of a sejp object as an uint32_t.
@@ -225,20 +232,35 @@ std::vector< float > extract_float_vector(std::map< std::string, sejp::value > *
 //parse a texture map property of a sejp object into an S72's texture storage
 // throws if the property is missing or doesn't parse as a texture
 // deletes property from the object and returns a reference to the S72's textures container on success
+// Usage: material.normal_map = &extract_map(&object, "normalMap", &s72, "Material \"" + name + "\"'s normalMap");
 S72::Texture &extract_map(std::map< std::string, sejp::value > *object_, std::string const &key, S72 *s72_, std::string const &what) {
+	/* 
+	Object might look like:
+	{
+		"type":"MATERIAL",
+		"name":"pbr:PBRMaterial",
+		"normalMap":{ "src":"wood_nor.png", "format":"linear" },
+		"displacementMap":{ "src":"wood_disp.png", "format":"linear" },
+		"pbr":{
+			"albedo":{ "src":"wood_diff.png", "format":"srgb" },
+			"roughness":{ "src":"wood_rough.png", "format":"linear" },
+			"metalness":0
+		}
+	},
+	*/
 	assert(object_);
-	auto &object = *object_;
+	auto &object = *object_; 
 	assert(s72_);
 	auto &s72 = *s72_;
 
 	std::map< std::string, sejp::value > obj;
 	try {
-		obj = object.at(key).as_object().value();
+		obj = object.at(key).as_object().value(); // e.g. key=normalMap, object = { "src":"wood_nor.png", "format":"linear" } - a normalMap object
 	} catch (std::exception &) {
 		throw std::runtime_error(what + " is not an object.");
 	}
 
-	std::string src = extract_string(&obj, "src", what + "'s src");
+	std::string src = extract_string(&obj, "src", what + "'s src");  // return wood_nor.png
 	S72::Texture::Type type = S72::Texture::Type::flat;
 	if (obj.contains("type")) {
 		static std::map< std::string, S72::Texture::Type > string_to_type{
@@ -505,7 +527,7 @@ S72 S72::load(std::string const &scene_file) {
 				uint32_t offset = extract_uint32_t(&obj, "offset", "Mesh \"" + name + "\"'s indices.offset");
 				std::string format = extract_string(&obj, "format", "Mesh \"" + name + "\"'s indices.format");
 				mesh.indices.emplace(Mesh::Indices{
-					.src = s72.data_files[src],
+					.src = s72.data_files[src], // meanwhile, insert entries implicitly into data_files using src as key
 					.offset = offset,
 					.format = format_to_VkIndexType(format),
 				});
@@ -980,36 +1002,37 @@ S72 S72::load(std::string const &scene_file) {
 	//fix paths for Datafiles and Textures to be relative to the s72 file
 	std::string scene_folder = "";
 	{ //extract prefix for relative paths:
-		auto pos = scene_file.find_last_of("\\/");
+		auto pos = scene_file.find_last_of("\\/"); // scene_file might look like ../example_scene/materials.s72
 		if (pos != std::string::npos) {
-			scene_folder = scene_file.substr(0 , pos+1);
+			scene_folder = scene_file.substr(0 , pos+1); // ./example_scene/materials.s72 -> ../example_scene/
 		}
 	}
 
 	for (auto &[key, value] : s72.data_files) {
-		value.src = key;
-		value.path = scene_folder + value.src;
+		value.src = key; // e.g. cube.b72
+		value.path = scene_folder + value.src; // ../example_scene/cube.b72
 	}
 
 	for (auto &[key, value] : s72.textures) {
-		value.path = scene_folder + value.src;
+		value.path = scene_folder + value.src; // ../example_scene/wood_nor.png
 	}
 
-    // load the DataFiles from disk in binary mode //?? Credit: Zulip discussions https://15-472-s26.zulipchat.com/#narrow/channel/560762-C.2B.2B/topic/Reading.20A.20File/with/572892122
+    // load the DataFiles from disk in binary mode // Credit: Zulip discussions https://15-472-s26.zulipchat.com/#narrow/channel/560762-C.2B.2B/topic/Reading.20A.20File/with/572892122
     for (auto &[key, data_file] : s72.data_files) {
         // Open file in binary mode, positioned at end (ate) to get size
-        std::ifstream file(data_file.path, std::ios::binary | std::ios::ate); // open, cursor at end 
-        if (!file) {
+        std::ifstream file(data_file.path, std::ios::binary | std::ios::ate); // open file in binary mode; start the file at the end (std::ios::ate)
+        if (!file.is_open()) {
             throw std::runtime_error("Failed to open data file \"" + data_file.path + "\".");
         }
 
-        // Get file size (ate positions cursor at end)
-        std::streamsize size = file.tellg(); // // size = cursor position 
-        file.seekg(0, std::ios::beg); // seek back to beginning
+		// TODO: According to Prof Jim's comment, this might have some race-condition-y problems
+        // Get file size
+		size_t size = static_cast< size_t >(file.tellg()); // position at end == file size in bytes; tellg() returns the current get position (read position) of the stream as a byte offset from the beginning. 
+		file.seekg(0); // seekg() sets the get position to a specified location.
 
-        // Allocate buffer and read entire file
+		// Allocate buffer and read file
         data_file.data.resize(size);
-        if (!file.read(reinterpret_cast<char*>(data_file.data.data()), size)) {
+        if (!file.read(reinterpret_cast< char * >(data_file.data.data()), data_file.data.size())) {
             throw std::runtime_error("Failed to read data file \"" + data_file.path + "\".");
         }
 
