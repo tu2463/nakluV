@@ -64,7 +64,7 @@ struct Tutorial : RTG::Application {
 
 		void create(RTG &, VkRenderPass render_pass, uint32_t subpass);
 		void destroy(RTG &);
-	} lines_pipeline; //?? what does the last line in this struct syntax mean?
+	} lines_pipeline; // what does the last line in this struct syntax mean//vv just means lines_pipeline's type is this struct
 
 	struct ObjectsPipeline {
 		// descriptor set layouts:

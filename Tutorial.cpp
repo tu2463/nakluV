@@ -199,6 +199,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		);
 		workspace.Camera = rtg.helpers.create_buffer(
 			sizeof(LinesPipeline::Camera),
+
+			// use uniform buffer because Camera data (CLIP_FROM_WORLD matrix) is a small block of constants that every vertex shader invocation reads - same value for all vertices in a draw call
 			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as a uniform buffer, also going to have GPU copy into this memory
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
 			Helpers::Unmapped // don't get a pointer to memory
