@@ -26,13 +26,20 @@ custom_flags_and_rules();
 
 //maek.CPP(...) builds a c++ file:
 // it returns the path to the output object file
+
+// Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
+//(common_objs is the object files used by both the cube utility and the viewer/main e.g. RTG, Helpers, stb_image, stb_image_write
+common_objs = [
+	maek.CPP('RTG.cpp'),
+	maek.CPP('Helpers.cpp'),
+];
+
 const main_objs = [
 	maek.CPP('Tutorial.cpp'),
 	maek.CPP('PosColVertex.cpp'),
 	maek.CPP('PosNorTexVertex.cpp'),
 	maek.CPP('PosNorTexTanVertex.cpp'),
-	maek.CPP('RTG.cpp'),
-	maek.CPP('Helpers.cpp'),
+	...common_objs,
 	maek.CPP('main.cpp'),
 	maek.CPP("sejp.cpp"),
 	maek.CPP("S72.cpp"),
@@ -64,11 +71,9 @@ main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[.
 
 // -- A2-diffuse cube util --
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
-//(common_objs is the object files used by both the cube utility and the viewer e.g. RTG, Helpers, stb_image, stb_image_write
-common_objs = [];
-
 const cube_objs = [
     maek.CPP('main-cube.cpp'),
+    maek.CPP('CubePipeline.cpp'),
     ...common_objs,
 ];
 

@@ -1,272 +1,388 @@
-/*
- * cube utility — pre-integrates a radiance environment cubemap into a
- * lambertian irradiance cubemap.
- *
- * Usage: cube in.png --lambertian out.png
- *
- * Both files are in RGBE encoding (R,G,B mantissa bytes + shared exponent in
- * alpha), with 6 faces stacked vertically (total height = 6 * face_edge_length).
- *
- * Assignment specification:
- *   "when run with the command cube in.png --lambertian out.png reads a cubemap
- *    from in.png, integrates over it to produce a lambertian lookup table cube
- *    map, and stores this in out.png."
- */
-
-#include <iostream>
-#include <vector>
-#include <string>
-#include <cassert>
-#include <cmath>
+#include "RTG.hpp"
+#include "VK.hpp"
+#include "CubePipeline.hpp"
 
 #include <glm/glm.hpp>
 
-#include "RGBE.hpp"
+#include <iostream>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+// Wraps one cubemap face on the GPU: an R32G32B32A32_SFLOAT storage image + a uniform buffer with the WORLD_FROM_PX transform matrix, plus descriptor set binding both
+struct GPUFace {
+    Helpers::AllocatedImage image;
+    Helpers::AllocatedBuffer buffer;
+    VkImageView view;
+    VkDescriptorSet descriptors = VK_NULL_HANDLE;
+    void create(RTG& rtg, VkDescriptorPool descriptor_pool, CubePipeline const &cube_pipeline, uint32_t const sz, glm::vec3 * const data) {
+        // add a 4th component to the data vector
+        std::vector< glm::vec4 > data_padded; 
+        data_padded.reserve(sz*sz);
+        for (uint32_t i = 0; i < sz*sz; ++i) {
+            data_padded.emplace_back(glm::vec4(data[i], 0.0f));
+        }
+        
+        // create image
+        image = rtg.helpers.create_image(
+            VkExtent2D{.width = sz, .height = sz},
+            VK_FORMAT_R32G32B32A32_SFLOAT, // why use this format for cube face image//vv I think it's because we need 4-component to support storage
+            VK_IMAGE_TILING_OPTIMAL,
 
-// stb_image_write uses sprintf internally, which clang marks deprecated on macOS.
-// Suppress that warning only around this header so -Werror doesn't trip on it.
-#pragma clang diagnostic push // saves the current warning state
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#define STB_IMAGE_WRITE_IMPLEMENTATION // silences the sprintf deprecation warning
-#include "stb_image_write.h"
-#pragma clang diagnostic pop // restores -Werror and all other warnings for the rest of your code
+            /*
+            VK_IMAGE_USAGE_STORAGE_BIT: Compute shader can read/write pixels directly
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT: Can be the destination of a transfer — needed so transfer_to_image can upload the initial data to it
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT: Can be the source of a transfer — needed to copy results back out
+            */
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // allocate on GPU, not visible on CPU
+            Helpers::Unmapped // CPU won't map this memory
+        );
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+        // upload the image
+        rtg.helpers.transfer_to_image(data_padded.data(), sizeof(data_padded[0]) * sz * sz, image, VK_IMAGE_LAYOUT_GENERAL);
 
-// ---------------------------------------------------------------------------
-// Solid angle helpers
-// ---------------------------------------------------------------------------
+        // -- buffer --
+        { // buffer
+            buffer = rtg.helpers.create_buffer(
+                sizeof(CubePipeline::Face),
 
-// Antiderivative used by TexelCoordSolidAngle below.
-// Credit: Rory Driscoll, "Cubemap Texel Solid Angle"
-//   https://www.rorydriscoll.com/2012/01/15/cubemap-texel-solid-angle/
-// (Referenced in #A2 > Rendering Equation, 15-472 Spring '26 Zulip,
-//  and discussed further in #A2 > More on Texel Areas by Jim McCann.)
-static float AreaElement(float x, float y) {
-    return std::atan2(x * y, std::sqrt(x * x + y * y + 1.0f));
-}
+                /*
+                Uniform vs Storage for this:
+                - Uniform buffers have a size limit (~16KB typically) but are faster — drivers can cache them in dedicated constant memory
+                - Storage buffers are larger and writable but have more overhead
+                - Small read-only config data like face dimensions → uniform is the right choice
+                */
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // use uniform buffer bit because Face holds per-face data that can be read as constants
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                Helpers::Unmapped
+            );
 
-// Returns the solid angle (steradians) subtended by input texel (u, v) on a
-// cubemap face of edge length `size`. u and v are integer texel coordinates.
-//
-// This is the AMD CubeMapGen formula (via Rory Driscoll's blog). Jim McCann
-// confirmed in #A2 > More on Texel Areas (15-472 Spring '26 Zulip) that this
-// method is essentially exact — it matches the spherical polygon area formula
-// to within floating-point noise, and is within 0.1% of the Jacobian approx.
-//
-// Note: the face index is not needed; solid angle depends only on (u, v, size).
-static float texel_solid_angle(int u, int v, int size) {
-    // Map integer texel index to [-1,1] NDC at texel center
-    float U = (2.0f * (u + 0.5f) / float(size)) - 1.0f;
-    float V = (2.0f * (v + 0.5f) / float(size)) - 1.0f;
-    float inv = 1.0f / float(size); // half-texel width in NDC
-    // Solid angle = integral of the differential area element over the texel's
-    // projected footprint on the unit sphere, evaluated via the antiderivative.
-    return AreaElement(U - inv, V - inv)
-         - AreaElement(U - inv, V + inv)
-         - AreaElement(U + inv, V - inv)
-         + AreaElement(U + inv, V + inv);
-}
+            CubePipeline::Face face_info{};
 
-// ---------------------------------------------------------------------------
-// Cubemap face direction mapping
-// ---------------------------------------------------------------------------
+            // Each cubemap face is defined by three orthogonal vectors: (refer to 2/25 my lec note)
+            // looking toward +X, horizontal axis points −Z, vertical axis points −Y
+            // the "right" axis across the face in world space.
+            glm::vec3 s = glm::vec3(0.0f, 0.0f, -1.0f); // s = (0, 0, -1), meaning increasing pixel column moves in the −Z direction.
+            // the "down" axis across the face in world space.
+            glm::vec3 t = glm::vec3(0.0f, -1.0f, -0.0f); // t = (0, -1, 0), meaning increasing pixel row moves in the −Y direction.
+            // the direction the face "looks at" (the face normal); direction pointing straight out of the cube face 
+            glm::vec3 center = glm::vec3(1.0f, 0.0f, 0.0f); // For the +X face here, center = (1, 0, 0).
+            
+            /* 
+            So every pixel on the face corresponds to: dir(u,v)=center+s⋅x+t⋅y
+            Pixel coordinates go: 0 ... sz-1
+            But the cube face coordinate must go: -1 ... +1 for 3D direction in world
+                Range size: 2
+            So 1 pixel step corresponds to: 1 * (2 / sz)​ <- pixel width
+            */
 
-// Convert face index [0..5] and NDC coords (s, t) in [-1, 1] (s = horizontal,
-// t = vertical in image/face space, both increasing downward/rightward) to a
-// unit direction vector in world space.
-//
-// Convention matches Vulkan/OpenGL cubemap layer order (OpenGL 4.5 spec §8.13):
-//   0 = +X,  1 = -X,  2 = +Y,  3 = -Y,  4 = +Z,  5 = -Z
-static glm::vec3 face_to_direction(int face, float s, float t) {
-    glm::vec3 dir;
-    switch (face) {
-        case 0:  dir = glm::vec3( 1.0f,   -t,   -s); break; // +X
-        case 1:  dir = glm::vec3(-1.0f,   -t,    s); break; // -X
-        case 2:  dir = glm::vec3(   s,  1.0f,    t); break; // +Y
-        case 3:  dir = glm::vec3(   s, -1.0f,   -t); break; // -Y
-        case 4:  dir = glm::vec3(   s,    -t, 1.0f); break; // +Z
-        case 5:  dir = glm::vec3(  -s,    -t,-1.0f); break; // -Z
-        default: dir = glm::vec3(0.0f);                break;
-    }
-    return glm::normalize(dir);
-}
+            float pixel_width = 2.0f / float(sz);
+            face_info.WORLD_FROM_PX.m0 = pixel_width * s.x;
+            face_info.WORLD_FROM_PX.m1 = pixel_width * s.y;
+            face_info.WORLD_FROM_PX.m2 = pixel_width * s.z;
 
-// ---------------------------------------------------------------------------
-// Core baking function
-// ---------------------------------------------------------------------------
+            face_info.WORLD_FROM_PX.m3 = pixel_width * t.x;
+            face_info.WORLD_FROM_PX.m4 = pixel_width * t.y;
+            face_info.WORLD_FROM_PX.m5 = pixel_width * t.z;
 
-// Integrates the input radiance cubemap into an output lambertian irradiance
-// cubemap using a direct summation over all input texels.
-//
-// Integration formula (lambertian irradiance, divided by π so the shader just
-// multiplies by albedo):
-//
-//   L_irr(n) = (1/π) · Σ_{input texels i}  L_in(ωᵢ) · max(0, n·ωᵢ) · dωᵢ
-//
-// where dωᵢ is the solid angle of input texel i.
-//
-// Approach: direct integral (sum over all input texels, no Monte Carlo), as
-// recommended by Jim McCann in #A2 > Checking approach to cube utility
-// (15-472 Spring '26 Zulip, 2026-02-22):
-//   "Just write a loop over all input texels and accumulate the contribution
-//    from each one!"
-//
-// in_pixels : RGBE pixel data, width=in_size, height=6*in_size, 4 ch/px
-// out_pixels: filled with RGBE data, width=out_size, height=6*out_size, 4 ch/px
-void bake_radiance_into_lambertian(
-    const uint8_t *in_pixels,  int in_size,
-    std::vector<uint8_t> &out_pixels, int out_size)
-{
-    // Allocate output: 6 faces × out_size × out_size pixels, 4 bytes each (RGBE)
-    out_pixels.assign(size_t(6) * out_size * out_size * 4, 0u);
+            // computes the direction of pixel (0,0)
+            // first center = 1 - pixel_width / 2 = 1 - (2 / sz) / 2
+            float corner = 1.0f - pixel_width * 0.5f; //??-A2-diffuse understand this better
 
-    const char *face_names[6] = {"+X", "-X", "+Y", "-Y", "+Z", "-Z"};
-    // long long total_input_texels = 6LL * in_size * in_size;
-    // std::cout << "Baking: " << 6 << " faces × " << out_size << "×" << out_size
-    //           << " output texels, each summing " << total_input_texels
-    //           << " input texels (" << in_size << "px/face)." << std::endl;
+            face_info.WORLD_FROM_PX.m6 = center.x - corner * s.x - corner * t.x;
+            face_info.WORLD_FROM_PX.m7 = center.y - corner * s.y - corner * t.y;
+            face_info.WORLD_FROM_PX.m8 = center.z - corner * s.z - corner * t.z;
 
-    for (int f_out = 0; f_out < 6; ++f_out) {
-        std::cout << "  Face " << f_out << " (" << face_names[f_out] << ") ..." << std::flush;
-        for (int ty = 0; ty < out_size; ++ty) {
-            for (int tx = 0; tx < out_size; ++tx) {
+            /*
+            dir(u,v)= center + s * (2u/sz ​− corner) + t * (2v/sz ​− corner)
+            dir(u,v)= center + s * (u * pixel_width ​− corner) + t * (v * pixel_width ​− corner)
 
-                // Map output texel (f_out, tx, ty) → unit outgoing direction n
-                float s_out = (2.0f * (tx + 0.5f) / float(out_size)) - 1.0f;
-                float t_out = (2.0f * (ty + 0.5f) / float(out_size)) - 1.0f;
-                glm::vec3 n = face_to_direction(f_out, s_out, t_out);
+            full computation:
+                The matrix columns are:
+                    - Column 0: pixel_width * s (m0,m1,m2)
+                    - Column 1: pixel_width * t (m3,m4,m5)
+                    - Column 2: center - corner*s - corner*t (m6,m7,m8)
 
-                // Accumulate: Σ L_in(ωᵢ) · cos(θᵢ) · dωᵢ  over all input texels
-                glm::vec3 accum(0.0f);
+                multiply with (u, v, 1):
+                    result = col0*u + col1*v + col2*1
+                        = pixel_width*s*u  +  pixel_width*t*v  +  (center - corner*s - corner*t)
+                        = center  +  s*(pixel_width*u - corner)  +  t*(pixel_width*v - corner)
 
-                for (int f_in = 0; f_in < 6; ++f_in) {
-                    for (int iy = 0; iy < in_size; ++iy) {
-                        for (int ix = 0; ix < in_size; ++ix) {
+            Example: sz=4, then pixel_width=2/sz = 0.5, corner = 1-0.5*0.5 = 0.75
+            pixel(0,0) = center + s*(0-0.75) + t*(0-0.75) = center - 0.75s - 0.75t
+            pixel(3,3) = center + s*(1.5-0.75) + t*(1.5-0.75) = center + 0.75s + 0.75t
+            So the face spans directions from −0.75 to +0.75 along the face axes.
+            */
+            rtg.helpers.transfer_to_buffer( &face_info, sizeof(face_info), buffer );
+        }
 
-                            // Map input texel (f_in, ix, iy) → unit incoming direction ω
-                            float s_in = (2.0f * (ix + 0.5f) / float(in_size)) - 1.0f;
-                            float t_in = (2.0f * (iy + 0.5f) / float(in_size)) - 1.0f;
-                            glm::vec3 omega = face_to_direction(f_in, s_in, t_in);
+        { // image view
+            VkImageViewCreateInfo create_info{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .flags = 0, // normal image view; some other options are settings for density map
+                .format = image.format,
+                .image = image.handle,
+                .subresourceRange{
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // Color data (not depth, not stencil) 
+                    .baseArrayLayer = 0, // Start at layer 0 
+                    .layerCount = 1, // Only 1 layer (not a cubemap or array texture)
+                    .baseMipLevel = 0, // Start at mip level 0 (full resolution) 
+                    .levelCount = 1, // Only 1 mip level (no mipmaps) 
+                },
+                .viewType = VK_IMAGE_VIEW_TYPE_2D, // some other options are: 1D texture for gradient, volumetric data, cubemap, array of textures/cubemaps
+            };
+            VK( vkCreateImageView(rtg.device, &create_info, nullptr, &view));
+        }
 
-                            // cos(θ) = n · ω ; skip texels below the hemisphere
-                            float cos_theta = glm::dot(n, omega);
-                            if (cos_theta <= 0.0f) continue;
+        { // descriptor set with world_from_px and storage image
+            { // allocate
+                VkDescriptorSetAllocateInfo alloc_info{
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                    .descriptorPool = descriptor_pool,
+                    .descriptorSetCount = 1, // the .create fn is called once by in_face and once by out_face, creating one descriptor set for each GPUFace
+                    .pSetLayouts = &cube_pipeline.set01_face,
+                };
+                VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptors ) );
+            }
+            { // write
+                VkDescriptorBufferInfo buffer_info{ // write buffer info into descriptor set
+                    .buffer = buffer.handle, // buffer was populated by transfer_to_buffer; it stores a CubePipeline::Face that holds the WORLD_FROM_PX
+                    .offset = 0,
+                    .range = buffer.size,
+                };
+                VkDescriptorImageInfo image_info{
+                    // this is a storage image (has VK_IMAGE_USAGE_STORAGE_BIT), which typically uses the GENERAL layout
+                    // Reference: https://docs.vulkan.org/guide/latest/storage_image_and_texel_buffers.html#:~:text=swift%20Copied!-,Image%20Formats%20for%20Storage%20Images,for%20both%20reading%20and%20writing.
+                    .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+                    .imageView = view,
+                };
 
-                            // Solid angle subtended by this input texel on the unit sphere
-                            // Credit: AMD/Rory Driscoll formula (see texel_solid_angle above)
-                            float d_omega = texel_solid_angle(ix, iy, in_size);
-
-                            // Decode RGBE → linear float RGB
-                            // Input image layout: face f_in occupies rows [f_in*in_size .. (f_in+1)*in_size - 1]
-                            int in_row    = f_in * in_size + iy;
-                            int in_offset = (in_row * in_size + ix) * 4;
-                            glm::u8vec4 in_rgbe(
-                                in_pixels[in_offset + 0],
-                                in_pixels[in_offset + 1],
-                                in_pixels[in_offset + 2],
-                                in_pixels[in_offset + 3]);
-                            glm::vec3 L_in = rgbe_to_float(in_rgbe);
-
-                            accum += L_in * cos_theta * d_omega;
-                        }
+                std::array< VkWriteDescriptorSet, 2> writes{
+                    VkWriteDescriptorSet{
+                        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                        .descriptorCount = 1,
+                        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                        .dstArrayElement = 0, // Starting array index within the binding — 0 since this isn't an array descriptor
+                        .dstBinding = 0, // corresponds to the binding = N number delcared in shader AND in the VkDescriptorSetLayoutBinding in CubePipeline.cpp
+                        .dstSet = descriptors, // Which descriptor set to write into 
+                        .pBufferInfo = &buffer_info, // Points to a VkDescriptorBufferInfo specifying the actual buffer handle, offset, and range
+                    },
+                    VkWriteDescriptorSet{
+                        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                        .descriptorCount = 1,
+                        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        .dstArrayElement = 0,
+                        .dstBinding = 1,
+                        .dstSet = descriptors,
+                        .pImageInfo = &image_info,
                     }
-                }
+                };
 
-                // Divide by π: stores L_irr = E/π so shader computes L_out = albedo · L_irr
-                // (Lambertian BRDF = albedo/π, so L_out = albedo/π · E = albedo · E/π)
-                glm::vec3 L_irr = accum * (1.0f / float(M_PI));
-
-                // Encode linear float RGB → RGBE and write to output buffer
-                // Output layout: face f_out occupies rows [f_out*out_size .. (f_out+1)*out_size - 1]
-                glm::u8vec4 out_rgbe = float_to_rgbe(L_irr);
-                int out_row    = f_out * out_size + ty;
-                int out_offset = (out_row * out_size + tx) * 4;
-                out_pixels[out_offset + 0] = out_rgbe.r; // R mantissa
-                out_pixels[out_offset + 1] = out_rgbe.g; // G mantissa
-                out_pixels[out_offset + 2] = out_rgbe.b; // B mantissa
-                out_pixels[out_offset + 3] = out_rgbe.a; // shared exponent (e + 128)
+                vkUpdateDescriptorSets(
+                    rtg.device,
+                    uint32_t(writes.size()), // count of descriptor writes
+                    writes.data(),
+                    0, // descriptorCopyCount
+                    nullptr // pDescriptorCopies
+                );
             }
         }
-        std::cout << " done." << std::endl;
     }
-    std::cout << "Bake complete." << std::endl;
-}
+    void destroy(RTG &rtg) {
+        vkDestroyImageView(rtg.device, view, nullptr);
+        view = VK_NULL_HANDLE;
+        rtg.helpers.destroy_buffer(std::move(buffer));
+        rtg.helpers.destroy_image(std::move(image));
+    }
+};
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
+/*
+### main
+- configure application (RTG) in headless mode
+- create cube pipeline
+- create descriptor pool
+- create command pool
+- allocate command buffer
 
-int main(int argc, char **argv) {
+### run pipeline
+- Bind compute pipeline
+- Bind in/out descriptor sets
+- vkCmdDispatchBase dispatches sz×sz×1 workgroups — one thread per output texel
+*/
+int main (int argc, char **argv) {
     try {
-        // Parse: cube in.png --lambertian out.png
-        std::string in_file;
-        std::string out_file;
+        // init RTG headless
+        // configure application:
+		RTG::Configuration configuration;
 
-        for (int i = 1; i < argc; ++i) {
-            std::string arg = argv[i];
-            if (arg == "--lambertian") {
-                if (i + 1 >= argc)
-                    throw std::runtime_error("--lambertian requires an output filename.");
-                out_file = argv[++i];
-            } else if (in_file.empty()) {
-                in_file = arg;
-            } else {
-                throw std::runtime_error("Unrecognized argument '" + arg + "'.");
+		configuration.application_info = VkApplicationInfo{
+			.pApplicationName = "Cube Utility",
+			.applicationVersion = VK_MAKE_VERSION(0,0,0),
+			.pEngineName = "Unknown",
+			.engineVersion = VK_MAKE_VERSION(0,0,0),
+			.apiVersion = VK_API_VERSION_1_3
+		};
+
+        bool print_usage = false;
+
+		try {
+			configuration.parse(argc, argv);
+		} catch (std::runtime_error &e) {
+			std::cerr << "Failed to parse arguments:\n" << e.what() << std::endl;
+			print_usage = true;
+		}
+
+		if (print_usage) {
+			std::cerr << "Usage:" << std::endl;
+			RTG::Configuration::usage( [](const char *arg, const char *desc){ 
+				std::cerr << "    " << arg << "\n        " << desc << std::endl;
+			});
+			return 1;
+		}
+
+        configuration.headless = true;
+
+		// loads vulkan library, creates surface, initializes helpers:
+		RTG rtg(configuration); // Creates an RTG object named rtg; Passes configuration as a parameter to the constructor
+
+        // TODO: create CubePipeline
+        CubePipeline cube_pipeline;
+        cube_pipeline.create(rtg);
+
+        // TODO: load images / create descriptors
+        // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params), but the current code only creates one in_face and one out_face — it's a work in progress. The comment at line 186
+        
+        VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+        { // create descriptor pool
+            std::array< VkDescriptorPoolSize, 2> pool_sizes{
+                VkDescriptorPoolSize{
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // for the WORLD_FROM_PIXEL transform buffers
+                    .descriptorCount = 6 * 2 + 1, // one for each input and output cube face, plus one for params//??A2-diffuse
+                },
+                VkDescriptorPoolSize{
+                    .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // for the face images
+                    .descriptorCount = 6 * 2, // one for each input and output cube face
+                }
+            };
+
+            VkDescriptorPoolCreateInfo create_info{
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+
+                /* three options for flags:
+                - 0: Default — sets can only be freed by resetting/destroying the whole pool
+                - VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: Allows freeing individual descriptor sets with vkFreeDescriptorSets
+                - VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT: Lets you update descriptors after binding them to a command buffer (needed for bindless) */
+                .flags = 0, // never need to free individual sets, therefore use 0 instead of CREATE_FREE_DESCRIPTOR_SET_BIT, thus CANNOT free individual descriptors allocated from this pool
+                .maxSets = 12 + 1, // (13 sets: 6 for in cube face + 1 for out cube face + 1 for params)
+                .poolSizeCount = uint32_t(pool_sizes.size()),
+                .pPoolSizes = pool_sizes.data(),
+            };
+
+            VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &descriptor_pool));
+        }
+
+        VkCommandPool command_pool = VK_NULL_HANDLE;
+        { // create command pool
+            VkCommandPoolCreateInfo create_info{
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = rtg.graphics_queue_family.value(), // safely retrieve the value stored in the std::optional object 
+            };
+            VK( vkCreateCommandPool(rtg.device, &create_info, nullptr, &command_pool));
+        }
+
+        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+        { // allocate command buffer from command pool
+            VkCommandBufferAllocateInfo alloc_info{
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = command_pool,
+                .commandBufferCount = 1,
+
+                /*level controls how the command buffer is submitted
+                - VK_COMMAND_BUFFER_LEVEL_PRIMARY: Submitted directly to a queue via vkQueueSubmit
+                - VK_COMMAND_BUFFER_LEVEL_SECONDARY: Cannot be submitted to a queue. Must be called from a primary buffer via vkCmdExecuteCommands. Used for multi-threading. */
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            };
+            VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &command_buffer));
+        }
+
+        size_t sz = 128; // set to 128*128 pixels
+        std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
+        GPUFace in_face;
+        in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+        GPUFace out_face;
+        out_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+
+        { // run pipeline
+            /*
+            write a sequence of commands into a CPU-side buffer:
+            1. vkBeginCommandBuffer — puts the buffer into recording state. The driver prepares to accept commands.                                                                                                                                                             
+            2. vkCmd* calls — each call writes a command into the buffer (draw, bind pipeline, copy image, etc.). Nothing runs on the GPU yet.                                                                                                                                  
+            3. vkEndCommandBuffer — finalizes the buffer. No more commands can be added.                                                                                                                                                                                      
+            4. vkQueueSubmit — sends the finished buffer to the GPU queue. Only now does the GPU execute the recorded commands.                                                                                                                                               
+            */
+            // Bind compute pipeline
+            VK( vkResetCommandBuffer(command_buffer, 0) ); // reset the command buffer (clear old commands)
+            { // begin recording
+                VkCommandBufferBeginInfo begin_info{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, //will record again every submit
+                };
+                VK( vkBeginCommandBuffer(command_buffer, &begin_info));
             }
+
+            // use the cube pipeline
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, cube_pipeline.handle);
+
+            { // Bind in/out descriptor sets
+                std::array<VkDescriptorSet, 2> descriptor_sets{
+                    in_face.descriptors,
+                    out_face.descriptors,
+                    /*params_descriptors, */ // TODO - when will we need it?
+                };
+                vkCmdBindDescriptorSets(
+					command_buffer, //command buffer
+					VK_PIPELINE_BIND_POINT_COMPUTE, //pipeline bind point
+					cube_pipeline.layout, //pipeline layout
+					0, //first set
+					uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
+                    0, nullptr // dynamic offsets count, ptr
+                );
+            }
+
+            // vkCmdDispatchBase, a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
+            vkCmdDispatchBase(command_buffer, 0, 0, 1, sz, sz, 1); // Dispatch a grid of workgroups, IDs start at (0, 0, 1)
+
+            // done recording
+            VK( vkEndCommandBuffer(command_buffer) );
+
+            { // submit command buffer
+                VkSubmitInfo submit_info{
+                    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                    .commandBufferCount = 1,
+                    .pCommandBuffers = &command_buffer,
+                };
+                VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, nullptr) );
+            }
+
+            VK( vkDeviceWaitIdle(rtg.device) ); // blocks the CPU until all operations on all queues of the device have finished.
         }
 
-        if (in_file.empty())
-            throw std::runtime_error("No input file given. Usage: cube in.png --lambertian out.png");
-        if (out_file.empty())
-            throw std::runtime_error("No output file given. Usage: cube in.png --lambertian out.png");
+        std::cout << "Computing: done." << std::endl;
 
-        // Load input cubemap (stb_image always returns 4 channels when asked)
-        int in_w, in_h, orig_channels;
-        uint8_t *in_data = stbi_load(in_file.c_str(), &in_w, &in_h, &orig_channels, 4);
-        if (!in_data)
-            throw std::runtime_error("Failed to load '" + in_file + "': " + stbi_failure_reason());
+        // TODO: get back results
+        // TOOD: destroy all the things
+        in_face.destroy(rtg);
+        out_face.destroy(rtg);
 
-        // Validate: 6-face vertically stacked cubemap requires height == 6 * width
-        if (in_h != 6 * in_w) {
-            stbi_image_free(in_data);
-            throw std::runtime_error(
-                "Expected height == 6 * width for cubemap, got "
-                + std::to_string(in_w) + "x" + std::to_string(in_h));
-        }
-        int in_size = in_w; // per-face edge length
+        vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
+        descriptor_pool = VK_NULL_HANDLE;
 
-        std::cout << "Loaded " << in_file
-                  << " (" << in_w << "x" << in_h
-                  << ", " << in_size << "px per face)" << std::endl;
+        vkDestroyCommandPool(rtg.device, command_pool, nullptr);
+        command_pool = VK_NULL_HANDLE;
 
-        // Bake: output is 16×16 per face (sufficient for lambertian — very low frequency)
-        // Credit: Jim McCann, #A2 > Checking approach to cube utility (15-472 Spring '26 Zulip):
-        //   "16x16 is enough for the lambertian map."
-        constexpr int OUT_SIZE = 16;
-        std::vector<uint8_t> out_pixels;
-        bake_radiance_into_lambertian(in_data, in_size, out_pixels, OUT_SIZE);
-        stbi_image_free(in_data);
-
-        // Write output PNG: width=OUT_SIZE, height=6*OUT_SIZE, 4 channels (RGBE), stride=OUT_SIZE*4
-        int out_w = OUT_SIZE;
-        int out_h = OUT_SIZE * 6;
-        int ok = stbi_write_png(out_file.c_str(), out_w, out_h, 4,
-                                out_pixels.data(), out_w * 4);
-        if (!ok)
-            throw std::runtime_error("stbi_write_png failed for '" + out_file + "'.");
-
-        std::cout << "Wrote " << out_file
-                  << " (" << out_w << "x" << out_h << " RGBE)" << std::endl;
+        cube_pipeline.destroy(rtg);
 
     } catch (std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
         return 1;
     }
-    return 0;
 }
