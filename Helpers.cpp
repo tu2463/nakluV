@@ -228,7 +228,7 @@ void Helpers::transfer_to_buffer(void const *data, size_t size, AllocatedBuffer 
 	destroy_buffer(std::move(transfer_src)); // what does std::move do //??
 }
 
-void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount) {
+void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount, VkImageLayout final_layout) {
 	// refsol::Helpers_transfer_to_image(rtg, data, size, &target);
 
 	assert(target.handle != VK_NULL_HANDLE); // target imgage should be allocated already
@@ -351,7 +351,10 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 			.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, // waits until all transfer writes are complete, then transitions the image
 			.dstAccessMask = VK_ACCESS_SHADER_READ_BIT, // wailts until image transition finishes, then allows fragment shader reads to proceed
 			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+
+			// A2-diffuse-error: vkCmdPipelineBarrier(): pImageMemoryBarriers[0].newLayout (VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) is not compatible with VkImage 0x230000000023 usage flags VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_STORAGE_BIT.
+			// But storage image need VK_IMAGE_LAYOUT_GENERAL
+			.newLayout = final_layout,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,  //  Not transferring ownership between queues
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = target.handle, // The image to transition 

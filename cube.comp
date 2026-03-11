@@ -1,0 +1,35 @@
+// Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
+// Also learned from https://learnopengl.com/Guest-Articles/2022/Compute-Shaders/Introduction
+
+#version 450
+// std140: a memory layout rule for Uniform Buffer Object. It defines how the GPU packs struct fields in memory so the CPU and GPU agree on where each field sits. Without it, the GPU might pad/align fields differently for the C++ struct.
+// Other option: std430 — tighter packing (no vec3 padding quirks), but not allowed for UBOs in older GLSL, only for SSBOs.
+// UBO: a GPU buffer that holds read-only data that the shader reads uniformly, — meaning every invocation reads the same value (as opposed to storage images/buffers where each invocation reads/writes different pixels)
+layout(set=0, binding=0, std140) uniform Inface {
+    mat3x3 WORLD_FROM_IN_PX;
+};
+layout(set=0, binding=1, rgba32f) uniform restrict readonly image2D inFace;
+
+layout(set=1, binding=0, std140) uniform OutFace {
+    mat3x3 WORLD_FROM_OUT_PX;
+};
+layout(set=1, binding=1, rgba32f) uniform restrict image2D outFace;
+
+void main() {
+    // which output pixel is this code responsible for?
+    // - uvec3 gl_GlobalInvocationID = global index of the current work item = (gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID)
+    // -- uvec3 gl_LocalInvocationID = index of the current work item in the work group
+    // -- unvec3 gl_WorkGroupID and uvec3 gl_WorkGroupSize = index and size of of the work group (local size) operated on defined with layout
+    // - The user can use a concept called work groups to define the space the compute shader is operating on. Work Groups are the smallest amount of compute operations that the user can execute
+    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
+
+    // test: copy in -> out
+    vec3 acc = imageLoad(inFace, texelCoord).rgb;
+    vec4 value = vec4(acc, 0.0);
+	
+    // The imageStore function takes: 
+    // - the image unit to write to as first argument, 
+    // - the absolute texel coordinate as second argument, and 
+    // - the data value to store at this texel as third.
+    imageStore(outFace, texelCoord, value);
+}

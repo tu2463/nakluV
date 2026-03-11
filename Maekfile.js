@@ -73,15 +73,15 @@ main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[.
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 const cube_objs = [
     maek.CPP('main-cube.cpp'),
-    maek.CPP('CubePipeline.cpp'),
+    // maek.CPP('CubePipeline.cpp'),
     ...common_objs,
 ];
 
-// const cube_shaders = [
-//     maek.GLSLC('cube.comp', 'spv/cube.comp.lambertian', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DLAMBERTIAN'] } ),
-//     maek.GLSLC('cube.comp', 'spv/cube.comp.ggx', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DGGX'] } ),
-// ];
-// cube_objs.push( maek.CPP('CubePipeline.cpp', undefined, { depends:[...cube_shaders] } ) );
+const cube_shaders = [
+    maek.GLSLC('cube.comp', 'spv/cube.comp.lambertian', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DLAMBERTIAN'] } ),
+    maek.GLSLC('cube.comp', 'spv/cube.comp.ggx', { GLSLCFlags:[...maek.DEFAULT_OPTIONS.GLSLCFlags, '-DGGX'] } ),
+];
+cube_objs.push( maek.CPP('CubePipeline.cpp', undefined, { depends:[...cube_shaders] } ) );
 
 // link the executable
 const cube_exe = maek.LINK([...cube_objs], 'bin/cube');

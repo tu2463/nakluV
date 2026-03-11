@@ -70,7 +70,9 @@ struct Helpers {
 
 	// NOTE: synchronizes *hard* against the GPU; inefficient to use for streaming data!
 	void transfer_to_buffer(void const *data, size_t size, AllocatedBuffer &target);
-	void transfer_to_image(void const *data, size_t size, AllocatedImage &image, uint32_t layerCount = 1); //NOTE: image layout after call is VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+	// NOTE: in tutorial, image layout after call is VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	// added a VkImageLayout parameter in A2-diffuse to set layout after call to be VK_IMAGE_LAYOUT_GENERAL for storage images
+	void transfer_to_image(void const *data, size_t size, AllocatedImage &image, uint32_t layerCount = 1, VkImageLayout final_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 	VkCommandPool transfer_command_pool = VK_NULL_HANDLE;
 	VkCommandBuffer transfer_command_buffer = VK_NULL_HANDLE;

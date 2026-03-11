@@ -1,23 +1,53 @@
 #include "CubePipeline.hpp"
+
+#include "Helpers.hpp"
 #include "VK.hpp"
 
+static uint32_t cube_code[] =
+#include "spv/cube.comp.lambertian.inl"
+;
+
+/*
+  GGX (Trowbridge-Reitz)
+  - Models specular/glossy surfaces with microfacet theory
+  - Reflection depends on view angle and surface roughness
+  - Has a characteristic long tail — highlights fade gradually rather than sharply cutting off
+  - Controlled by a roughness parameter (0 = mirror, 1 = very rough)
+  - Examples: metals, plastics, polished surfaces
+  - Used in physically-based rendering (PBR) pipelines
+
+  - cube.comp.lambertian — prefilters the environment map for diffuse irradiance (used for the diffuse lighting term)
+  - cube.comp.ggx — prefilters for specular reflections at various roughness levels (used for the specular term in split-sum approximation)
+*/
+// #include "spv/cube.comp.ggx.inl"
+
+// Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 void CubePipeline::create(RTG &rtg) {
-    // Section 2 — create(): shader module
+    VkShaderModule module = rtg.helpers.create_shader_module(cube_code);
+   
+    { // create the descriptor set layout - set0_in layout holds input face info
+        std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
+            VkDescriptorSetLayoutBinding{
+                .binding = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            },
+            VkDescriptorSetLayoutBinding{
+                .binding = 1,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            },
+        };
 
-    // void CubePipeline::create(RTG &rtg) {
-    //     VkShaderModule module = rtg.helpers.create_shader_module(cube_code);
-    // Wraps the SPIR-V bytes into a VkShaderModule. Must be destroyed after the pipeline is created (section 2e).
-
-    // ---
-    // Section 3 — create(): descriptor set layout for faces (set01_face)
-
-    //     { // set0 and set1 share this layout: UBO at binding=0, storage image at binding=1
-    //         std::array<VkDescriptorSetLayoutBinding, 2> bindings{ ... };
-    //         VK( vkCreateDescriptorSetLayout(..., &set01_face) );
-    //     }
-    // Both the input face (set 0) and output face (set 1) use the same layout — that's why it's called set01_face. The layout has:
-    // - binding = 0 → VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER (the Face / WORLD_FROM_PX matrix)
-    // - binding = 1 → VK_DESCRIPTOR_TYPE_STORAGE_IMAGE (the pixel data)
+        VkDescriptorSetLayoutCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = uint32_t(bindings.size()),
+            .pBindings = bindings.data(),
+        };
+        VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set01_face) );
+    }
 
     // ---
     // Section 4 — create(): descriptor set layout for params (set2_params)
@@ -28,34 +58,38 @@ void CubePipeline::create(RTG &rtg) {
     //     }
     // Just one binding: binding = 0 → VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER (the Params / roughness value).
 
-    // ---
-    // Section 5 — create(): pipeline layout
-
-    //     { // pipeline layout uses 3 descriptor sets
-    //         std::array<VkDescriptorSetLayout, 3> layouts{
-    //             set01_face,   // set 0 = input face
-    //             set01_face,   // set 1 = output face (reuses same layout)
-    //             set2_params,  // set 2 = roughness params
-    //         };
-    //         VK( vkCreatePipelineLayout(..., &layout) );
-    //     }
-    // Three sets, two of which reuse set01_face because input and output faces have identical structure.
-
-    // ---
-    // Section 6 — create(): compute pipeline + cleanup
-
-    //     { // create the compute pipeline
-    //         VkComputePipelineCreateInfo create_info{
-    //             .flags = VK_PIPELINE_CREATE_DISPATCH_BASE,  // needed for vkCmdDispatchBase
-    //             .stage = { .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main" },
-    //             .layout = layout,
-    //         };
-    //         VK( vkCreateComputePipelines(..., &handle) );
-    //     }
-
-    //     vkDestroyShaderModule(rtg.device, module, nullptr); // SPIR-V no longer needed
-    // }
-    // VK_PIPELINE_CREATE_DISPATCH_BASE is required because main-cube.cpp uses vkCmdDispatchBase (not the plain vkCmdDispatch).
+    { // create pipeline layout
+        std::array< VkDescriptorSetLayout, 2> layouts = {
+           set01_face,
+           set01_face,
+        };
+        VkPipelineLayoutCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .flags = 0,
+            .pushConstantRangeCount = 0,
+            .pPushConstantRanges = nullptr,
+            .pSetLayouts = layouts.data(),
+            .setLayoutCount = uint32_t(layouts.size()),
+        };
+        VK( vkCreatePipelineLayout(rtg.device, &create_info, nullptr, &layout) );
+    }
+    
+    { // create compute pipeline
+        VkComputePipelineCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .flags = VK_PIPELINE_CREATE_DISPATCH_BASE,
+            .layout = layout,
+            .stage = VkPipelineShaderStageCreateInfo{
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, // this is a compute shader (not vertex/fragment)
+                .module = module, // VkShaderModule
+                .pName = "main", // tells Vulkan which function to call as the starting point when the shader run
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            }
+        };
+        VK( vkCreateComputePipelines(rtg.device, VK_NULL_HANDLE, 1, &create_info, nullptr, &handle) );
+    }
+    // modules no longer needed now that pipeline is created:
+    vkDestroyShaderModule(rtg.device, module, nullptr);
 }
 
 void CubePipeline::destroy(RTG &rtg) {

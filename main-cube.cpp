@@ -6,6 +6,8 @@
 
 #include <iostream>
 
+// Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
+
 // Wraps one cubemap face on the GPU: an R32G32B32A32_SFLOAT storage image + a uniform buffer with the WORLD_FROM_PX transform matrix, plus descriptor set binding both
 struct GPUFace {
     Helpers::AllocatedImage image;
@@ -37,7 +39,7 @@ struct GPUFace {
         );
 
         // upload the image
-        rtg.helpers.transfer_to_image(data_padded.data(), sizeof(data_padded[0]) * sz * sz, image, VK_IMAGE_LAYOUT_GENERAL);
+        rtg.helpers.transfer_to_image(data_padded.data(), sizeof(data_padded[0]) * sz * sz, image, 1, VK_IMAGE_LAYOUT_GENERAL);
 
         // -- buffer --
         { // buffer
@@ -306,6 +308,8 @@ int main (int argc, char **argv) {
 
         size_t sz = 128; // set to 128*128 pixels
         std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
+
+        // in_face and out_face each holds a descriptor set
         GPUFace in_face;
         in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
         GPUFace out_face;
