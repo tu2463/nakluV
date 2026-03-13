@@ -25,7 +25,7 @@ static uint32_t cube_code[] =
 void CubePipeline::create(RTG &rtg) {
     VkShaderModule module = rtg.helpers.create_shader_module(cube_code);
    
-    { // create the descriptor set layout - set0_in layout holds input face info
+    { // create the descriptor set layout  - set0_in layout holds input face info
         std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
             VkDescriptorSetLayoutBinding{
                 .binding = 0,

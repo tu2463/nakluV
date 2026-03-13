@@ -69,6 +69,12 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			if (culling_mode != "none" && culling_mode != "frustum") {
 				throw std::runtime_error("--culling must be 'none' or 'frustum'.");
 			}
+		} else if (arg == "--lambertian" ) {
+			if (argi + 1 >= argc) throw std::runtime_error("--lambertian requires an output filename.");
+			argi += 1;
+			out_file = argv[argi];
+		} else if (in_file.empty()) {
+			in_file = arg;
 		} else {
 			throw std::runtime_error("Unrecognized argument '" + arg + "'.");
 		}

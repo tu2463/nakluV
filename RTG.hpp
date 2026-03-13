@@ -89,8 +89,12 @@ struct RTG {
 		// A1-show: camera mode
 		std::string camera_mode = "user"; // scene/user/debug
 
-		// A2-cull: culling mode
+		// A1-cull: culling mode
 		std::string culling_mode = "none"; // none/frustum/potentially more for A1-fast
+
+		// A2-diffuse
+		std::string in_file;
+		std::string out_file;
 	};
 
 	Configuration configuration; //configuration, as used (might have extra extensions, layers, or flags added)

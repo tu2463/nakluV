@@ -3,6 +3,9 @@
 #include "CubePipeline.hpp"
 
 #include <glm/glm.hpp>
+// we need this #define because stb_image also something like "#ifdef STB_IMAGE_IMPLEMENTATION ..."
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include <iostream>
 
@@ -139,7 +142,7 @@ struct GPUFace {
                 VkDescriptorSetAllocateInfo alloc_info{
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                     .descriptorPool = descriptor_pool,
-                    .descriptorSetCount = 1, // the .create fn is called once by in_face and once by out_face, creating one descriptor set for each GPUFace
+                    .descriptorSetCount = 1, // the .create fn is called once by each face, creating one descriptor set for each GPUFace
                     .pSetLayouts = &cube_pipeline.set01_face,
                 };
                 VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptors ) );
@@ -249,8 +252,33 @@ int main (int argc, char **argv) {
         CubePipeline cube_pipeline;
         cube_pipeline.create(rtg);
 
-        // TODO: load images / create descriptors
-        // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params), but the current code only creates one in_face and one out_face — it's a work in progress. The comment at line 186
+        // Load image using stb_image
+        if (configuration.in_file.empty())
+            throw std::runtime_error("No input file given. Usage: cube in.png --lambertian out.png");
+        if (configuration.out_file.empty())
+            throw std::runtime_error("No output file given. Usage: cube in.png --lambertian out.png");
+
+        int in_w, in_h, channels;
+        /* c_str returns a const char* pointer to the underlying null-terminated C string of a std::string
+        std::string s = "hello";
+        const char* p = s.c_str();  // p points to "hello\0"  */
+        unsigned char* in_data = stbi_load(configuration.in_file.c_str(), &in_w, &in_h, &channels, 4);
+
+        if (!in_data) {
+            throw std::runtime_error("WARNING: Failed to load cubemap from \"" + configuration.in_file + "\": " + stbi_failure_reason());
+        }
+
+        if (in_h != in_w * 6) {  // check if this is 6 face stacked vertically
+            stbi_image_free(in_data);
+            throw std::runtime_error("WARNING: Invalid cubemap from \"" + configuration.in_file + "\". Expected height == 6 * width, got: in_h=" + std::to_string(in_h) + ", in_w=" + std::to_string(in_w));
+        }
+
+        std::cout << "Loaded " << configuration.in_file
+                  << " (" << in_w << "x" << in_h
+                  << "px per face)" << std::endl;
+
+        // TODO: create descriptors
+        // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params); Prof's code only creates one in_face and one out_face.
         
         VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
         { // create descriptor pool
@@ -306,14 +334,44 @@ int main (int argc, char **argv) {
             VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &command_buffer));
         }
 
-        size_t sz = 128; // set to 128*128 pixels
-        std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
+        // size_t sz = 128; // set to 128*128 pixels
+        size_t sz = in_w; // set to 128*128 pixels
+        // std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
+        std::array<GPUFace, 12> faces;
+        for (int f = 0; f < 6; f++) {
+            std::vector< glm::vec3 > data(sz * sz);
+            
+            int row_start = f * in_w;
+            int row_end = (f + 1) * in_w;
+            for (int r = row_start; r < row_end; r++) {
+                for (int c = 0; c < in_w; c++) {
+                    /*
+                    stbi_load(..., 4) loads the image as a flat array of bytes, row by row, 4 bytes per pixel (RGBA):                                                                                                                                                                                               
+                    [ R G B A | R G B A | R G B A | ... ]                                                                                                                                                                                                                                                           
+                      pixel 0   pixel 1   pixel 2 
+                    RGBA values in range[0, 255]
+                    */
+                    unsigned char* px = in_data + (r * in_w + c) * 4; // points to the first byte of one pixel; 4 is the offset in byte
+                    data[(r - row_start) * in_w + c] = glm::vec3( // then read the next consecutive bytes (ignore A) & convert RGB from [0, 255] to [0, 1]
+                        px[0] / 255.0f, 
+                        px[1] / 255.0f,
+                        px[2] / 255.0f
+                    );
+                }
+            }
 
-        // in_face and out_face each holds a descriptor set
-        GPUFace in_face;
-        in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
-        GPUFace out_face;
-        out_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+             // in_face and out_face each holds a descriptor set
+            GPUFace in_face;
+            in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+            GPUFace out_face;
+            out_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+
+            // the in_face and out_face of faces f are at faces[f * 2] and faces[f * 2 + 1]
+            // e.g. faces 0 -> 0, 1; faces 1 -> 2, 3; faces 2 -> 4, 5; ...; faces 5 -. 10, 11
+            faces[f * 2] = std::move(in_face);
+            faces[f * 2 + 1] = std::move(out_face);
+        }
+        std::cout << "Created " << faces.size() << " faces" << std::endl;
 
         { // run pipeline
             /*
@@ -337,19 +395,21 @@ int main (int argc, char **argv) {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, cube_pipeline.handle);
 
             { // Bind in/out descriptor sets
-                std::array<VkDescriptorSet, 2> descriptor_sets{
-                    in_face.descriptors,
-                    out_face.descriptors,
-                    /*params_descriptors, */ // TODO - when will we need it?
-                };
-                vkCmdBindDescriptorSets(
-					command_buffer, //command buffer
-					VK_PIPELINE_BIND_POINT_COMPUTE, //pipeline bind point
-					cube_pipeline.layout, //pipeline layout
-					0, //first set
-					uint32_t(descriptor_sets.size()), descriptor_sets.data(), //descriptor sets count, ptr
-                    0, nullptr // dynamic offsets count, ptr
-                );
+                for (int f = 0; f < 6; f++) {
+                    std::array<VkDescriptorSet, 2> descriptor_sets;
+                    descriptor_sets[0] = faces[f * 2].descriptors;
+                    descriptor_sets[1] = faces[f * 2 + 1].descriptors;
+                    // TODO: add params_descriptors to descriptor_sets
+
+                    vkCmdBindDescriptorSets(
+                        command_buffer,                                           // command buffer
+                        VK_PIPELINE_BIND_POINT_COMPUTE,                           // pipeline bind point
+                        cube_pipeline.layout,                                     // pipeline layout
+                        0,                                                        // first set
+                        uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
+                        0, nullptr                                                // dynamic offsets count, ptr
+                    );
+                }
             }
 
             // vkCmdDispatchBase, a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
@@ -374,8 +434,9 @@ int main (int argc, char **argv) {
 
         // TODO: get back results
         // TOOD: destroy all the things
-        in_face.destroy(rtg);
-        out_face.destroy(rtg);
+        for (auto &face : faces) {
+            face.destroy(rtg);
+        }
 
         vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
         descriptor_pool = VK_NULL_HANDLE;
