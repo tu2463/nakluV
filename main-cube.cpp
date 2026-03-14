@@ -3,9 +3,16 @@
 #include "CubePipeline.hpp"
 
 #include <glm/glm.hpp>
+
 // we need this #define because stb_image also something like "#ifdef STB_IMAGE_IMPLEMENTATION ..."
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+// suppress the 'sprintf' is deprecated warning
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#include "stb_image_write.h"
+#pragma clang diagnostic pop
 
 #include <iostream>
 
@@ -276,10 +283,8 @@ int main (int argc, char **argv) {
         std::cout << "Loaded " << configuration.in_file
                   << " (" << in_w << "x" << in_h
                   << "px per face)" << std::endl;
-
-        // TODO: create descriptors
+        // create descriptors
         // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params); Prof's code only creates one in_face and one out_face.
-        
         VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
         { // create descriptor pool
             std::array< VkDescriptorPoolSize, 2> pool_sizes{
@@ -301,7 +306,7 @@ int main (int argc, char **argv) {
                 - VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: Allows freeing individual descriptor sets with vkFreeDescriptorSets
                 - VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT: Lets you update descriptors after binding them to a command buffer (needed for bindless) */
                 .flags = 0, // never need to free individual sets, therefore use 0 instead of CREATE_FREE_DESCRIPTOR_SET_BIT, thus CANNOT free individual descriptors allocated from this pool
-                .maxSets = 12 + 1, // (13 sets: 6 for in cube face + 1 for out cube face + 1 for params)
+                .maxSets = 12 + 1, // 13 sets: 6 in-faces + 6 out-faces + 1 params
                 .poolSizeCount = uint32_t(pool_sizes.size()),
                 .pPoolSizes = pool_sizes.data(),
             };
@@ -432,11 +437,87 @@ int main (int argc, char **argv) {
 
         std::cout << "Computing: done." << std::endl;
 
-        // TODO: get back results
-        // TOOD: destroy all the things
+        VkDeviceSize face_size = sz * sz * sizeof(glm::vec4);
+        Helpers::AllocatedBuffer out_pixels_buffer = rtg.helpers.create_buffer(
+            face_size * 6,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            Helpers::Mapped
+        );
+        { // get back results
+            // Bind compute pipeline
+            VK( vkResetCommandBuffer(command_buffer, 0) ); // reset the command buffer (clear old commands)
+            { // begin recording
+                VkCommandBufferBeginInfo begin_info{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, //will record again every submit
+                };
+                VK( vkBeginCommandBuffer(command_buffer, &begin_info));
+            }
+
+            constexpr int OUT_SIZE = 16; // writeup: having an edge length of 16 pixels is reasonable.
+            int out_w = OUT_SIZE;
+            int out_h = OUT_SIZE * 6;
+
+            for (int f = 0; f < 6; f++) {
+                GPUFace &out_face = faces[f * 2 + 1];
+
+                VkBufferImageCopy region{
+                    .bufferOffset = f * face_size,
+                    .bufferRowLength = 0, // means tightly packed
+                    .bufferImageHeight = 0,
+                    .imageSubresource{
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .mipLevel = 0,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1,
+                    },
+                    .imageOffset{.x = 0, .y = 0, .z = 0},
+                    .imageExtent{
+                        .width = out_face.image.extent.width,
+                        .height = out_face.image.extent.height,
+                        .depth = 1},
+                };
+                vkCmdCopyImageToBuffer(
+                    command_buffer, // buffer
+                    out_face.image.handle, // src
+                    VK_IMAGE_LAYOUT_GENERAL, 
+                    out_pixels_buffer.handle, 
+                    1, &region
+                );
+            }
+
+            // Submit command buffer
+            VK( vkEndCommandBuffer(command_buffer) );
+
+            { // submit command buffer
+                VkSubmitInfo submit_info{
+                    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                    .commandBufferCount = 1,
+                    .pCommandBuffers = &command_buffer,
+                };
+                VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, nullptr) );
+            }
+
+            VK( vkDeviceWaitIdle(rtg.device) ); // blocks the CPU until all operations on all queues of the device have finished.
+
+            int write_ok = stbi_write_png(
+                configuration.out_file.c_str(), out_w, out_h, 
+                4, // channel (RGBA)
+                out_pixels_buffer.allocation.data(), 
+                out_w * 4 // stride = # of bytes/row = (# of pixels/row) * (# of bytes/pixel) = out_w * 4
+            );
+            if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + configuration.out_file + "'.");
+        }
+        
+        // destroy all the things
         for (auto &face : faces) {
             face.destroy(rtg);
         }
+
+        if (out_pixels_buffer.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(out_pixels_buffer));
+		}
 
         vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
         descriptor_pool = VK_NULL_HANDLE;
