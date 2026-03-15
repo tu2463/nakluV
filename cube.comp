@@ -2,6 +2,8 @@
 // Also learned from https://learnopengl.com/Guest-Articles/2022/Compute-Shaders/Introduction
 
 #version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
+
 // std140: a memory layout rule for Uniform Buffer Object. It defines how the GPU packs struct fields in memory so the CPU and GPU agree on where each field sits. Without it, the GPU might pad/align fields differently for the C++ struct.
 // Other option: std430 — tighter packing (no vec3 padding quirks), but not allowed for UBOs in older GLSL, only for SSBOs.
 // UBO: a GPU buffer that holds read-only data that the shader reads uniformly, — meaning every invocation reads the same value (as opposed to storage images/buffers where each invocation reads/writes different pixels)
@@ -16,20 +18,64 @@ layout(set=1, binding=0, std140) uniform OutFace {
 layout(set=1, binding=1, rgba32f) uniform restrict image2D outFace;
 
 void main() {
-    // which output pixel is this code responsible for?
     // - uvec3 gl_GlobalInvocationID = global index of the current work item = (gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID)
     // -- uvec3 gl_LocalInvocationID = index of the current work item in the work group
     // -- unvec3 gl_WorkGroupID and uvec3 gl_WorkGroupSize = index and size of of the work group (local size) operated on defined with layout
     // - The user can use a concept called work groups to define the space the compute shader is operating on. Work Groups are the smallest amount of compute operations that the user can execute
-    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy); // this answers: which output pixel is this code responsible for?
 
-    // test: copy in -> out
-    vec3 acc = imageLoad(inFace, texelCoord).rgb;
-    vec4 value = vec4(acc, 0.0);
-	
+    // imageSize: retrieve the dimensions of an image. Returns ivec2 for 2D image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageSize.xhtml
+    ivec2 outSize = imageSize(outFace);
+    ivec2 inSize = imageSize(inFace);
+
+    if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) return; // Valid pixel coordinates are 0 to outSize.x - 1
+
+    // pixel (px, py)  -> multiply by WORLD_FROM_PX  -> world-space direction vector
+    vec3 n = normalize(WORLD_FROM_OUT_PX * vec3(float(outCoord.x), float(outCoord.y), 1.0));
+    
+    // emitted light = integrate over all incoming radiance
+    // accumulate contribution from every pixel of this inFace
+    // to build up the irradiance at surface normal n
+    // i.e. the total light arriving at a surface patch facing direction n
+    vec3 acc = vec3(0.0);
+
+    //                    Li(ωi) = incoming radiance from direction ωi = color stored in the input cubemap face at pixel(x, y)
+    //                             max(n·ωi, 0) attenuates light coming from behind the surface, where the dot product is negative
+    //                                              dΩ weights each light sample by how much of
+    // irradiance(n) = Σ  Li(ωi) · max(n · ωi, 0) · dΩ(ωi)
+    //                 {all input pixels}
+
+
+    // Credit: Prof Jim's texel-area.js from https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/More.20on.20Texel.20Areas/with/575171358
+    float area = (4.0 / float(inSize.x * inSize.x)); // one pixel of area on the cube surface; the cube face spans [-1, 1] × [-1, 1], total area = 4
+    for (int y = 0; y < inSize.y; y++) {
+        for (int x = 0; x < inSize.x; x++) {
+            // calculates how much radiance from direction in_dir reaches the surface facing n
+
+            // imageLoad: load a single texel from an image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageLoad.xhtml
+            vec3 Li = imageLoad(inFace, ivec2(x, y)).rgb;
+
+            vec3 in_dir = WORLD_FROM_IN_PX * vec3(float(x), float(y), 1.0); // not normalized yet
+            float cos_theta = max(0, dot(n, normalize(in_dir)));
+
+            float s = (float(x) + 0.5) / float(inSize.x) * 2 - 1;
+            float t = (float(y) + 0.5) / float(inSize.y) * 2 - 1;
+            // z = 1 implicitly (face plane)
+            float face_dist_sq = s*s + t*t + 1.0; // = x2 + y2 + z2 = squared dist from the origin to the point (s, t, u), u = 1 (face sits on plane with depth = 1) on the cube face plane
+
+            float dir_omega = area * pow(face_dist_sq, -1.5); // dΩ(ωi)
+            
+            acc += Li * cos_theta * dir_omega;
+        }
+    }
+    
+    // vec3 acc = imageLoad(inFace, outCoord).rgb; // test: copy in -> out
+    
+    vec3 prevAcc = imageLoad(outFace, outCoord).rgb;
+
     // The imageStore function takes: 
     // - the image unit to write to as first argument, 
     // - the absolute texel coordinate as second argument, and 
     // - the data value to store at this texel as third.
-    imageStore(outFace, texelCoord, value);
+    imageStore(outFace, outCoord, vec4(acc + prevAcc, 0.0)); // acc is for current face, prevAcc is for all prev faces
 }

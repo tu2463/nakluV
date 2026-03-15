@@ -340,7 +340,7 @@ int main (int argc, char **argv) {
         }
 
         // size_t sz = 128; // set to 128*128 pixels
-        size_t sz = in_w; // set to 128*128 pixels
+        size_t sz = in_w;
         // std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
         std::array<GPUFace, 12> faces;
         for (int f = 0; f < 6; f++) {
@@ -414,11 +414,11 @@ int main (int argc, char **argv) {
                         uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
                         0, nullptr                                                // dynamic offsets count, ptr
                     );
+
+                    // vkCmdDispatchBase, a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
+                    vkCmdDispatchBase(command_buffer, 0, 0, 1, sz, sz, 1); // Dispatch a grid of workgroups, IDs start at (0, 0, 1); dispatch the compute shader
                 }
             }
-
-            // vkCmdDispatchBase, a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
-            vkCmdDispatchBase(command_buffer, 0, 0, 1, sz, sz, 1); // Dispatch a grid of workgroups, IDs start at (0, 0, 1)
 
             // done recording
             VK( vkEndCommandBuffer(command_buffer) );
