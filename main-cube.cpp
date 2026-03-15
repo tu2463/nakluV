@@ -24,7 +24,7 @@ struct GPUFace {
     Helpers::AllocatedBuffer buffer;
     VkImageView view;
     VkDescriptorSet descriptors = VK_NULL_HANDLE;
-    void create(RTG& rtg, VkDescriptorPool descriptor_pool, CubePipeline const &cube_pipeline, uint32_t const sz, glm::vec3 * const data) {
+    void create(RTG& rtg, VkDescriptorPool descriptor_pool, CubePipeline const &cube_pipeline, uint32_t const sz, glm::vec3 * const data, int face_i) {
         // add a 4th component to the data vector
         std::vector< glm::vec4 > data_padded; 
         data_padded.reserve(sz*sz);
@@ -70,14 +70,39 @@ struct GPUFace {
             CubePipeline::Face face_info{};
 
             // Each cubemap face is defined by three orthogonal vectors: (refer to 2/25 my lec note)
-            // looking toward +X, horizontal axis points −Z, vertical axis points −Y
-            // the "right" axis across the face in world space.
-            glm::vec3 s = glm::vec3(0.0f, 0.0f, -1.0f); // s = (0, 0, -1), meaning increasing pixel column moves in the −Z direction.
-            // the "down" axis across the face in world space.
-            glm::vec3 t = glm::vec3(0.0f, -1.0f, -0.0f); // t = (0, -1, 0), meaning increasing pixel row moves in the −Y direction.
-            // the direction the face "looks at" (the face normal); direction pointing straight out of the cube face 
-            glm::vec3 center = glm::vec3(1.0f, 0.0f, 0.0f); // For the +X face here, center = (1, 0, 0).
-            
+            // https://github.com/15-472/s72/blob/main/examples/env-cube.png
+            static const glm::vec3 face_s[6] = { // what does static mean? why use it? // right across the face
+               {0, 0, -1}, // looking toward +x, horizontal axis points −Z, vertical axis points −Y; s = (0, 0, -1), meaning increasing pixel column moves in the −Z direction.
+               {0, 0, 1}, // toward -x
+               {1, 0, 0}, // +y
+               {1, 0, 0}, // -y
+               {1, 0, 0}, // +z
+               {-1, 0, 0}, // -z
+            };
+
+            static const glm::vec3 face_t[6] = { // the "down" axis across the face in world space.
+                {0, -1, 0}, // +x face; t = (0, -1, 0), meaning increasing pixel row moves in the −Y direction.
+                {0, -1, 0},
+                {0, 0, 1},
+                {0, 0, -1},
+                {0, -1, 0},
+                {0, -1, 0},
+            };
+
+            // the direction the face "looks at" (the face normal); direction pointing straight out of the cube face
+            static const glm::vec3 face_center[6] = {
+                {1, 0, 0}, // +x face
+                {-1, 0, 0},
+                {0, 1, 0},
+                {0, -1, 0},
+                {0, 0, 1},
+                {0, 0, -1},
+            };
+
+            glm::vec3 s = face_s[face_i];
+            glm::vec3 t = face_t[face_i];
+            glm::vec3 center = face_center[face_i];
+
             /* 
             So every pixel on the face corresponds to: dir(u,v)=center+s⋅x+t⋅y
             Pixel coordinates go: 0 ... sz-1
@@ -217,7 +242,7 @@ struct GPUFace {
 ### run pipeline
 - Bind compute pipeline
 - Bind in/out descriptor sets
-- vkCmdDispatchBase dispatches sz×sz×1 workgroups — one thread per output texel
+- vkCmdDispatchBase dispatches workgroups — one thread per output texel
 */
 int main (int argc, char **argv) {
     try {
@@ -341,7 +366,8 @@ int main (int argc, char **argv) {
 
         // size_t sz = 128; // set to 128*128 pixels
         size_t sz = in_w;
-        // std::vector< glm::vec3 > data(sz*sz, glm::vec3(1.0f, 1.0f, 1.0f));
+        constexpr int OUT_SIZE = 16; // writeup: having an edge length of 16 pixels is reasonable.
+
         std::array<GPUFace, 12> faces;
         for (int f = 0; f < 6; f++) {
             std::vector< glm::vec3 > data(sz * sz);
@@ -367,9 +393,10 @@ int main (int argc, char **argv) {
 
              // in_face and out_face each holds a descriptor set
             GPUFace in_face;
-            in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+            in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data(), f);
             GPUFace out_face;
-            out_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data());
+            std::vector< glm::vec3 > zero(OUT_SIZE * OUT_SIZE, glm::vec3(0.0f));
+            out_face.create(rtg, descriptor_pool, cube_pipeline, OUT_SIZE, zero.data(), f);
 
             // the in_face and out_face of faces f are at faces[f * 2] and faces[f * 2 + 1]
             // e.g. faces 0 -> 0, 1; faces 1 -> 2, 3; faces 2 -> 4, 5; ...; faces 5 -. 10, 11
@@ -396,7 +423,7 @@ int main (int argc, char **argv) {
                 VK( vkBeginCommandBuffer(command_buffer, &begin_info));
             }
 
-            // use the cube pipeline
+            // use the cube pipeline; tells GPU which shader to use
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, cube_pipeline.handle);
 
             { // Bind in/out descriptor sets
@@ -406,7 +433,7 @@ int main (int argc, char **argv) {
                     descriptor_sets[1] = faces[f * 2 + 1].descriptors;
                     // TODO: add params_descriptors to descriptor_sets
 
-                    vkCmdBindDescriptorSets(
+                    vkCmdBindDescriptorSets( // tells GPU which images/buffers the shader reads/writes
                         command_buffer,                                           // command buffer
                         VK_PIPELINE_BIND_POINT_COMPUTE,                           // pipeline bind point
                         cube_pipeline.layout,                                     // pipeline layout
@@ -415,8 +442,23 @@ int main (int argc, char **argv) {
                         0, nullptr                                                // dynamic offsets count, ptr
                     );
 
-                    // vkCmdDispatchBase, a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
-                    vkCmdDispatchBase(command_buffer, 0, 0, 1, sz, sz, 1); // Dispatch a grid of workgroups, IDs start at (0, 0, 1); dispatch the compute shader
+                    /* a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
+
+                    in compute shader: layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
+                    total invocations = dispatch dimensions × local_size dimensions                                                                                                                                                                                        
+                        = (sz × sz × 1)  ×  (1 × 1 × 1)                                                                                                                                                                                                      
+                        = sz × sz
+                    
+                    One invocation = one run of void main() in the shader, responsible for one output pixel.
+                    
+                    in our settings:
+                    - vkCmdDispatch(sz, sz, 1) → launches sz × sz workgroups
+                    - local_size = (1, 1, 1) → each workgroup has 1 thread
+                    - Total threads = sz × sz × 1 = one thread per output pixel
+
+                    When dispatch sz × sz workgroups, the GPU runs void main() sz × sz times *in parallel*, each time with a different gl_GlobalInvocationID. That ID is what tells each invocation which pixel it owns.
+                    */
+                    vkCmdDispatchBase(command_buffer, 0, 0, 1, OUT_SIZE, OUT_SIZE, 1); // Dispatch OUT_SIZE * OUT_SIZE workgroups, IDs start at (0, 0, 1);
                 }
             }
 
@@ -437,7 +479,8 @@ int main (int argc, char **argv) {
 
         std::cout << "Computing: done." << std::endl;
 
-        VkDeviceSize face_size = sz * sz * sizeof(glm::vec4);
+        // VkDeviceSize face_size = sz * sz * sizeof(glm::vec4); // bug: out_face are OUT_SIZE*OUT_SIZE; sz*sz is in_face size
+        VkDeviceSize face_size = OUT_SIZE * OUT_SIZE * sizeof(glm::vec4);
         Helpers::AllocatedBuffer out_pixels_buffer = rtg.helpers.create_buffer(
             face_size * 6,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -455,7 +498,6 @@ int main (int argc, char **argv) {
                 VK( vkBeginCommandBuffer(command_buffer, &begin_info));
             }
 
-            constexpr int OUT_SIZE = 16; // writeup: having an edge length of 16 pixels is reasonable.
             int out_w = OUT_SIZE;
             int out_h = OUT_SIZE * 6;
 
