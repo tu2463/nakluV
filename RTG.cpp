@@ -69,6 +69,10 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			if (culling_mode != "none" && culling_mode != "frustum") {
 				throw std::runtime_error("--culling must be 'none' or 'frustum'.");
 			}
+		} else if (arg == "-exposure") {
+			exposure = std::stoi(arg);
+		} else if (arg == "--tone-map") {
+			tone_map = arg;
 		} else if (arg == "--lambertian" ) {
 			if (argi + 1 >= argc) throw std::runtime_error("--lambertian requires an output filename.");
 			argi += 1;

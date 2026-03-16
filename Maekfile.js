@@ -72,7 +72,8 @@ main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[.
 // -- A2-diffuse cube util --
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 const cube_objs = [
-    maek.CPP('main-cube.cpp'),
+    // maek.CPP('CPU-main-cube.cpp'),
+    maek.CPP('main-cube.cpp'), // GPU-side
     // maek.CPP('CubePipeline.cpp'),
     ...common_objs,
 ];

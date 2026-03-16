@@ -56,7 +56,7 @@ void main() {
             vec3 Li = imageLoad(inFace, ivec2(x, y)).rgb;
 
             vec3 in_dir = WORLD_FROM_IN_PX * vec3(float(x), float(y), 1.0); // not normalized yet
-            float cos_theta = max(0, dot(n, normalize(in_dir)));
+            float cos_theta = max(0.0, dot(n, normalize(in_dir)));
 
             float s = (float(x) + 0.5) / float(inSize.x) * 2 - 1;
             float t = (float(y) + 0.5) / float(inSize.y) * 2 - 1;
@@ -70,12 +70,12 @@ void main() {
     }
     
     // vec3 acc = imageLoad(inFace, outCoord).rgb; // test: copy in -> out
-    
+    const float PI = 3.14159265358979323846;  
     vec3 prevAcc = imageLoad(outFace, outCoord).rgb;
 
     // The imageStore function takes: 
     // - the image unit to write to as first argument, 
     // - the absolute texel coordinate as second argument, and 
     // - the data value to store at this texel as third.
-    imageStore(outFace, outCoord, vec4(acc + prevAcc, 0.0)); // acc is for current face, prevAcc is for all prev faces
+    imageStore(outFace, outCoord, vec4((acc / PI) + prevAcc, 0.0)); // acc is for current face, prevAcc is for all prev faces
 }

@@ -1,6 +1,7 @@
 #include "RTG.hpp"
 #include "VK.hpp"
 #include "CubePipeline.hpp"
+#include "RGBE.hpp"
 
 #include <glm/glm.hpp>
 
@@ -383,11 +384,12 @@ int main (int argc, char **argv) {
                     RGBA values in range[0, 255]
                     */
                     unsigned char* px = in_data + (r * in_w + c) * 4; // points to the first byte of one pixel; 4 is the offset in byte
-                    data[(r - row_start) * in_w + c] = glm::vec3( // then read the next consecutive bytes (ignore A) & convert RGB from [0, 255] to [0, 1]
-                        px[0] / 255.0f, 
-                        px[1] / 255.0f,
-                        px[2] / 255.0f
-                    );
+                    // data[(r - row_start) * in_w + c] = glm::vec3( // BUG: input files are RGBE-encoded, need to use rgbe_to_float
+                    //     px[0] / 255.0f, 
+                    //     px[1] / 255.0f,
+                    //     px[2] / 255.0f
+                    // );
+                    data[(r - row_start) * in_w + c] = rgbe_to_float(glm::u8vec4(px[0], px[1], px[2], px[3])); // then read the next consecutive bytes (ignore A) & convert RGB from [0, 255] to [0, 1]
                 }
             }
 
@@ -427,38 +429,57 @@ int main (int argc, char **argv) {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, cube_pipeline.handle);
 
             { // Bind in/out descriptor sets
-                for (int f = 0; f < 6; f++) {
-                    std::array<VkDescriptorSet, 2> descriptor_sets;
-                    descriptor_sets[0] = faces[f * 2].descriptors;
-                    descriptor_sets[1] = faces[f * 2 + 1].descriptors;
-                    // TODO: add params_descriptors to descriptor_sets
+                for (int out_f = 0; out_f < 6; out_f++) {
+                    for (int in_f = 0; in_f < 6; in_f++) { // each out_face integrates over all incoming directions above the surface, thus need to sample ALL 6 in_faces
+                        std::array<VkDescriptorSet, 2> descriptor_sets;
+                        descriptor_sets[0] = faces[in_f * 2].descriptors;
+                        descriptor_sets[1] = faces[out_f * 2 + 1].descriptors;
+                        // TODO: add params_descriptors to descriptor_sets
 
-                    vkCmdBindDescriptorSets( // tells GPU which images/buffers the shader reads/writes
-                        command_buffer,                                           // command buffer
-                        VK_PIPELINE_BIND_POINT_COMPUTE,                           // pipeline bind point
-                        cube_pipeline.layout,                                     // pipeline layout
-                        0,                                                        // first set
-                        uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
-                        0, nullptr                                                // dynamic offsets count, ptr
-                    );
+                        vkCmdBindDescriptorSets( // tells GPU which images/buffers the shader reads/writes
+                            command_buffer,                                           // command buffer
+                            VK_PIPELINE_BIND_POINT_COMPUTE,                           // pipeline bind point
+                            cube_pipeline.layout,                                     // pipeline layout
+                            0,                                                        // first set
+                            uint32_t(descriptor_sets.size()), descriptor_sets.data(), // descriptor sets count, ptr
+                            0, nullptr                                                // dynamic offsets count, ptr
+                        );
 
-                    /* a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
+                        /* a compute dispatch command, dispatches a sz×sz×1 workgroup grid — one thread per output texel; actually run the thing
 
-                    in compute shader: layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
-                    total invocations = dispatch dimensions × local_size dimensions                                                                                                                                                                                        
-                        = (sz × sz × 1)  ×  (1 × 1 × 1)                                                                                                                                                                                                      
-                        = sz × sz
-                    
-                    One invocation = one run of void main() in the shader, responsible for one output pixel.
-                    
-                    in our settings:
-                    - vkCmdDispatch(sz, sz, 1) → launches sz × sz workgroups
-                    - local_size = (1, 1, 1) → each workgroup has 1 thread
-                    - Total threads = sz × sz × 1 = one thread per output pixel
+                        in compute shader: layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
+                        total invocations = dispatch dimensions × local_size dimensions                                                                                                                                                                                        
+                            = (sz × sz × 1)  ×  (1 × 1 × 1)                                                                                                                                                                                                      
+                            = sz × sz
+                        
+                        One invocation = one run of void main() in the shader, responsible for one output pixel.
+                        
+                        in our settings:
+                        - vkCmdDispatch(sz, sz, 1) → launches sz × sz workgroups
+                        - local_size = (1, 1, 1) → each workgroup has 1 thread
+                        - Total threads = sz × sz × 1 = one thread per output pixel
 
-                    When dispatch sz × sz workgroups, the GPU runs void main() sz × sz times *in parallel*, each time with a different gl_GlobalInvocationID. That ID is what tells each invocation which pixel it owns.
-                    */
-                    vkCmdDispatchBase(command_buffer, 0, 0, 1, OUT_SIZE, OUT_SIZE, 1); // Dispatch OUT_SIZE * OUT_SIZE workgroups, IDs start at (0, 0, 1);
+                        When dispatch sz × sz workgroups, the GPU runs void main() sz × sz times *in parallel*, each time with a different gl_GlobalInvocationID. That ID is what tells each invocation which pixel it owns.
+                        */
+                        vkCmdDispatchBase(command_buffer, 0, 0, 1, OUT_SIZE, OUT_SIZE, 1); // Dispatch OUT_SIZE * OUT_SIZE workgroups, IDs start at (0, 0, 1);
+
+                        // barrier: ensure write from this dispatch is visible to next dispatch
+                        // needed because shader reads accumulated values from all prev faces
+                        VkMemoryBarrier barrier{
+                            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                        };
+                        vkCmdPipelineBarrier(
+                            command_buffer,
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, // srcStageMask: wait until this dispatch's compute shader stage has finished writing
+                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, // dstStageMask: before the next dispatch's compute shader stage is allowed to start reading
+                            0, // dependencyFlags,
+                            1, &barrier, // memoryBarriers (count, data)
+                            0, nullptr, // bufferMemoryBarriers (count, data)
+                            0, nullptr // imageMemoryBarriers (count, data)
+                        );
+                    }
                 }
             }
 
@@ -543,10 +564,17 @@ int main (int argc, char **argv) {
 
             VK( vkDeviceWaitIdle(rtg.device) ); // blocks the CPU until all operations on all queues of the device have finished.
 
+            // out_pixels_buffer.allocation.data() was written by vkCmdCopyImageToBuffer, which copies out_face images into this buffer.
+            // it holds 6 faces × OUT_SIZE × OUT_SIZE pixels, each pixel as glm::vec4
+            glm::vec4* out_pixels_floats = reinterpret_cast<glm::vec4*>(out_pixels_buffer.allocation.data());
+            std::vector<glm::u8vec4> rgbe_out(out_w * out_h);
+            for (int i = 0; i < rgbe_out.size(); i++) {
+                rgbe_out[i] = float_to_rgbe(glm::vec3(out_pixels_floats[i]));
+            }
             int write_ok = stbi_write_png(
                 configuration.out_file.c_str(), out_w, out_h, 
                 4, // channel (RGBA)
-                out_pixels_buffer.allocation.data(), 
+                rgbe_out.data(),
                 out_w * 4 // stride = # of bytes/row = (# of pixels/row) * (# of bytes/pixel) = out_w * 4
             );
             if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + configuration.out_file + "'.");

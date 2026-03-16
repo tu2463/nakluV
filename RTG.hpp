@@ -95,6 +95,10 @@ struct RTG {
 		// A2-diffuse
 		std::string in_file;
 		std::string out_file;
+
+		// A2-tone
+		int exposure = 0;
+		std::string tone_map = "linear"; // linear/...
 	};
 
 	Configuration configuration; //configuration, as used (might have extra extensions, layers, or flags added)
