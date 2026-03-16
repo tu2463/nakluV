@@ -92,6 +92,23 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set3_CubeMap) );
 	}
 
+	{ // set4_LambertianCubeMap: same layout as set3, one samplerCube binding for the prefiltered irradiance cubemap
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			},
+		};
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set4_LambertianCubeMap) );
+	}
+
 	{ // create pipeline layout; why do we need blocks like this in C++ //vv simple syntax
 		VkPushConstantRange range{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -99,11 +116,12 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.size = sizeof(Push),
 		};
 
-		std::array< VkDescriptorSetLayout, 4 > layouts{
+		std::array< VkDescriptorSetLayout, 5 > layouts{
 			set0_World,
 			set1_Transforms,
 			set2_TEXTURE,
 			set3_CubeMap,
+			set4_LambertianCubeMap,
 		};
 		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //vv
@@ -248,6 +266,11 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set3_CubeMap != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set3_CubeMap, nullptr);
 		set3_CubeMap = VK_NULL_HANDLE;
+	}
+
+	if (set4_LambertianCubeMap != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set4_LambertianCubeMap, nullptr);
+		set4_LambertianCubeMap = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {

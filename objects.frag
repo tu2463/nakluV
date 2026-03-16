@@ -9,7 +9,8 @@ layout(set=0, binding=0, std140) uniform World {
 };
 
 layout(set=2, binding=0) uniform sampler2D TEXTURE;
-layout(set=3, binding=0) uniform samplerCube cubeMap; // cubeMap texture sampler; binding=0 was specified at VkDescriptorSetLayoutBinding
+layout(set=3, binding=0) uniform samplerCube cubeMap; // radiance cubemap (mirror / environment materials); binding=0 was specified at VkDescriptorSetLayoutBinding
+layout(set=4, binding=0) uniform samplerCube lambertianCubeMap; // prefiltered irradiance cubemap (X.lambertian.png, lambertian material)
 
 layout(push_constant) uniform Push {
     uint material_type;
@@ -30,8 +31,10 @@ void main() {
     // Credit: learned from https://learnopengl.com/Advanced-OpenGL/Cubemaps, https://registry.khronos.org/OpenGL-Refpages/gl4/html/texture.xhtml
     
     vec3 mat_light;
-    if (material_type == 0 || material_type == 1) { // pbr, lambertian
-        mat_light = SKY_ENERGY * (0.5 * dot(n, SKY_DIRECTION) + 0.5); // hemisphere sky
+    if (material_type == 0) { // pbr
+        mat_light = SKY_ENERGY * (0.5 * dot(n, SKY_DIRECTION) + 0.5); // hemisphere sky appoximation
+    } else if (material_type == 1) { // lambertian: sample the prefiltered irradiance cubemap at n; stores (incoming radiance at n)/PI, multiplying by albedo gives Lambertian output
+        mat_light = texture(lambertianCubeMap, n).rgb;
     } else if (material_type == 2) { // mirror
         vec3 I = normalize(position - EYE);
         vec3 R = reflect(I, normalize(n));

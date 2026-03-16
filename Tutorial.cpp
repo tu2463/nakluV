@@ -312,6 +312,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		// notice: this uploads the data during initialization instead of during the per-frame rendering loop (our rendering function Tutorial::render())// foreshadow!
 		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, object_vertices);
 	}
+	
+	uint32_t lambertian_texture_index = UINT32_MAX; // track texture index holds the prefiltered lambertian cubemap
 
 	{ // make textures for objects from S72 scene textures
 		// First, create a default white texture (index 0) for materials without textures
@@ -330,6 +332,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
 		}
 
+
 		// Now load textures from S72
 		for (auto &[key, s72_texture] : s72.textures) {
 			// Skip textures that failed to load (empty pixels)
@@ -341,6 +344,10 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			// Record the texture index for this S72 texture
 			uint32_t texture_index = static_cast<uint32_t>(textures.size());
 			texture_index_map[&s72_texture] = texture_index;
+
+			if (s72.env_lambertian_texture && &s72_texture == s72.env_lambertian_texture) {
+				lambertian_texture_index = texture_index;
+			}
 
 			// Choose format, VkImageCreateFlags, arrayLayers, layerCount based on the texture's specification
 			const void *data = s72_texture.pixels.data();
@@ -473,7 +480,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	}
 
 	{ // make image views for each texture image
-		for (Helpers::AllocatedImage const &image : textures) {
+		for (int i = 0; i < textures.size(); i++) {
+			Helpers::AllocatedImage const &image = textures[i];
 			// An image view describes how to access an image — Vulkan requires you to create a view before you can use an image in a shader or pipeline.
 			bool is_cubemap = (image.format == cubemap_format);
 
@@ -502,12 +510,17 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 
 			if (!is_cubemap) {
 				texture_views.emplace_back(image_view);
+			} else if (i == lambertian_texture_index) {
+				lambertian_cubemap_view = image_view;
 			} else {
-				assert(cubemap_view == VK_NULL_HANDLE); // A2 write-up specifies that "There is no more than one instance of an Environment object in every scene."
+				assert(cubemap_view == VK_NULL_HANDLE); // A2 write-up: "There is no more than one instance of an Environment object in every scene."
 				cubemap_view = image_view;
 			}
 		}
-		assert(texture_views.size() + (cubemap_view != VK_NULL_HANDLE ? 1 : 0) == textures.size());
+		assert(texture_views.size()
+			+ (cubemap_view != VK_NULL_HANDLE ? 1 : 0)
+			+ (lambertian_cubemap_view != VK_NULL_HANDLE ? 1 : 0)
+			== textures.size());
 	}
 
 	{ // make a sampler for the textures
@@ -541,14 +554,14 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::array< VkDescriptorPoolSize, 1 > pool_sizes{ // tells Vulkan how much memory to reserve in the pool, categorized by type
 			VkDescriptorPoolSize{ // total number of individual descriptors available, categorized by type 
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.descriptorCount = per_texture + 1, // 1 texture set per texture + 1 cube map set
+				.descriptorCount = per_texture + 2, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap
 			},
 		};
 
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = per_texture + 1, // total number of descriptor sets you can allocate from this pool
+			.maxSets = per_texture + 2, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(), // total number of individual descriptors available, categorized by type   
 		};
@@ -601,6 +614,34 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			writes.data(), // descriptorWrites; can I use &writes here //vv No. &writes references to the vector, writes.data() references to the first elem
 			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
 		);
+	}
+
+	if (lambertian_cubemap_view != VK_NULL_HANDLE) { // allocate and write the lambertian cubemap descriptor set (set=4)
+		VkDescriptorSetAllocateInfo alloc_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = texture_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &objects_pipeline.set4_LambertianCubeMap,
+		};
+		VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &lambertian_cubemap_descriptors) );
+
+		VkDescriptorImageInfo image_info{
+			.sampler = texture_sampler,
+			.imageView = lambertian_cubemap_view,
+			.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		};
+		std::array<VkWriteDescriptorSet, 1> writes{
+			VkWriteDescriptorSet{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = lambertian_cubemap_descriptors,
+				.dstBinding = 0,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &image_info,
+			},
+		};
+		vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 	}
 
 	if (cubemap_view != VK_NULL_HANDLE) { // allocate and write the cubemap descriptor sets
@@ -670,6 +711,11 @@ Tutorial::~Tutorial() {
 	if (cubemap_view != VK_NULL_HANDLE) {
 		vkDestroyImageView(rtg.device, cubemap_view, nullptr);
 		cubemap_view = VK_NULL_HANDLE;
+	}
+
+	if (lambertian_cubemap_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, lambertian_cubemap_view, nullptr);
+		lambertian_cubemap_view = VK_NULL_HANDLE;
 	}
 
 	for (auto &texture : textures) {
@@ -1297,12 +1343,23 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		// bind cubemap descriptor set (only when a cubemap exists in the scene)
 		if (cubemap_view != VK_NULL_HANDLE) {
 			vkCmdBindDescriptorSets(
-				workspace.command_buffer,			   // command buffer
-				VK_PIPELINE_BIND_POINT_GRAPHICS,	   // pipeline bind point
-				objects_pipeline.layout,			   // pipeline layout
-				3,									   // set number (slot 3)
+				workspace.command_buffer, // command buffer
+				VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
+				objects_pipeline.layout, // pipeline layout
+				3, // set=3: radiance cubemap (mirror / environment material)
 				1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
-				0, nullptr							   // dynamic offsets count, ptr
+				0, nullptr // dynamic offsets count, ptr
+			);
+		}
+		// bind lambertian cubemap at slot 4
+		if (lambertian_cubemap_view != VK_NULL_HANDLE) {
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				objects_pipeline.layout,
+				4, // set=4: prefiltered irradiance cubemap (lambertian material)
+				1, &lambertian_cubemap_descriptors,
+				0, nullptr
 			);
 		}
 

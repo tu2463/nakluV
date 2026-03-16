@@ -881,6 +881,19 @@ S72 S72::load(std::string const &scene_file) {
 				throw std::runtime_error("Environment \"" + name + "\"'s radiance is not a cube.");
 			}
 			s72.env_radiance_texture = environment.radiance;
+
+			{ // A2-diffuse: Get sky.lambertian.png from sky.png ("sky.png" -> "sky.lambertian.png") and register it as a texture  
+				std::string rad_src = environment.radiance->src;
+				std::string lam_src = rad_src.substr(0, rad_src.rfind('.')) + ".lambertian.png"; // will be the cubemap image prefiltered by cube.comp
+				// Use same key format as extract_map: "src, format <type_int>, type <format_int>"
+				std::string lam_key = lam_src
+					+ ", format " + std::to_string(int(S72::Texture::Type::cube))
+					+ ", type "   + std::to_string(int(S72::Texture::Format::rgbe));
+				s72.env_lambertian_texture = &s72.textures.emplace(
+					lam_key,
+					S72::Texture{.src = lam_src, .type = S72::Texture::Type::cube, .format = S72::Texture::Format::rgbe}
+				).first->second;
+			}
         }  else if (type == "LIGHT") {
             Light &light = s72.lights[name];
 

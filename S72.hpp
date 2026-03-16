@@ -227,6 +227,7 @@ struct S72 {
 	//we organize textures by src + type + format, so that two materials using to the same image *in the same way* end up referring to the same texture object:
     std::unordered_map< std::string, Texture > textures;
     Texture *env_radiance_texture = nullptr;
+    Texture *env_lambertian_texture = nullptr;
 
     /* zero or more "MATERIAL"s, all with unique names:
     {
