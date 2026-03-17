@@ -44,6 +44,16 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
+	{ // set culling mode based on input
+		if (rtg.configuration.tone_map == "linear") {
+			objects_pipeline.tone_map = ObjectsPipeline::ToneMap::Linear;
+		} else if (rtg.configuration.tone_map == "aces") {
+			objects_pipeline.tone_map = ObjectsPipeline::ToneMap::ACES;
+		} else {
+			throw std::runtime_error("Invalid tone map '" + rtg.configuration.tone_map + "'.");
+		}
+	}
+
 	// select a depth format:
 	// at least one of these two must be supported, according to the spec; but neither are required
 	depth_format = rtg.helpers.find_image_format(
@@ -312,7 +322,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		// notice: this uploads the data during initialization instead of during the per-frame rendering loop (our rendering function Tutorial::render())// foreshadow!
 		rtg.helpers.transfer_to_buffer(s72.vertices.data(), bytes, object_vertices);
 	}
-	
+
 	uint32_t lambertian_texture_index = UINT32_MAX; // track texture index holds the prefiltered lambertian cubemap
 
 	{ // make textures for objects from S72 scene textures
@@ -1368,6 +1378,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			{ // push material_type:
 				ObjectsPipeline::Push push{
 					.material_type = inst.material_type,
+					.exposure = rtg.configuration.exposure,
+					.tone_map_push = objects_pipeline.tone_map,
 				};
 				vkCmdPushConstants(workspace.command_buffer, objects_pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
 			}

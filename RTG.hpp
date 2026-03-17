@@ -98,7 +98,7 @@ struct RTG {
 
 		// A2-tone
 		int exposure = 0;
-		std::string tone_map = "linear"; // linear/...
+		std::string tone_map = "linear"; // linear
 	};
 
 	Configuration configuration; //configuration, as used (might have extra extensions, layers, or flags added)

@@ -97,11 +97,20 @@ struct Tutorial : RTG::Application {
 			Mirror = 2,
 			Environment = 3,
 		};
+
+		enum class ToneMap {
+			Linear = 0,
+			ACES = 1,
+		};
+
 		// push constants
 		struct Push
 		{
 			MaterialType material_type = MaterialType::Lambertian;
+			int exposure = 0;
+			ToneMap tone_map_push = ToneMap::Linear;
 		};
+		ToneMap tone_map = ToneMap::Linear;
 
 		VkPipelineLayout layout = VK_NULL_HANDLE;
 		

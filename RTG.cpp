@@ -69,10 +69,21 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			if (culling_mode != "none" && culling_mode != "frustum") {
 				throw std::runtime_error("--culling must be 'none' or 'frustum'.");
 			}
-		} else if (arg == "-exposure") {
-			exposure = std::stoi(arg);
+		} else if (arg == "--exposure") {
+			if (argi + 1 >= argc) throw std::runtime_error("--exposure requires a numeric argument.");
+			argi += 1;
+			try {
+				exposure = std::stoi(argv[argi]);
+			} catch (std::exception &) {
+				throw std::runtime_error("--exposure argument '" + std::string(argv[argi]) + "' is not a valid integer.");
+			}
 		} else if (arg == "--tone-map") {
-			tone_map = arg;
+			if (argi + 1 >= argc) throw std::runtime_error("--tone-map requires an argument.");
+			argi += 1;
+			tone_map = argv[argi];
+			if (tone_map != "linear" && tone_map != "aces" ) {
+				throw std::runtime_error("--tone_map must be 'linear' or 'aces'.");
+			}
 		} else if (arg == "--lambertian" ) {
 			if (argi + 1 >= argc) throw std::runtime_error("--lambertian requires an output filename.");
 			argi += 1;
