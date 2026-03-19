@@ -11,6 +11,7 @@ layout(set=0, binding=0, std140) uniform World {
 layout(set=2, binding=0) uniform sampler2D TEXTURE;
 layout(set=3, binding=0) uniform samplerCube cubeMap; // radiance cubemap (mirror / environment materials); binding=0 was specified at VkDescriptorSetLayoutBinding
 layout(set=4, binding=0) uniform samplerCube lambertianCubeMap; // prefiltered irradiance cubemap (X.lambertian.png, lambertian material)
+layout(set=5, binding=0) uniform sampler2D normalMap; // A2-normal
 
 layout(push_constant) uniform Push {
     uint material_type;
@@ -21,8 +22,10 @@ layout(push_constant) uniform Push {
 layout(location=0) in vec3 position;
 layout(location=1) in vec3 normal;
 layout(location=2) in vec2 texCoord;
+layout(location=3) in vec3 tangent;
+layout(location=4) in vec3 bitangent;
 
-layout(location = 0) out vec4 outColor;
+layout(location=0) out vec4 outColor;
 
 // Credit: 
 // https://bruop.github.io/tonemapping/
@@ -38,9 +41,19 @@ float tonemap_aces(float x) {
 }
 
 void main() {
+    // A2-normal
+    vec3 N = normalize(normal);
+    vec3 T = normalize(tangent);
+    vec3 B = normalize(bitangent);
+    mat3 TBN = mat3(T, B, N);
+
     // with lighting:
     // Basic hemispherical lighting equation in glsl syntax, where: n is the per-pixel normal (remember to normalize after interpolation!); texCoord is the interpolated texture coordinate; *_DIRECTION are uniforms giving the light directions; *_ENERGY are uniforms giving the light energy in appropriate units; ALBEDO is the albedo texture; and outColor is the value that gets written to the framebuffer.
-    vec3 n = normalize(normal);
+    // vec3 n = normalize(normal);
+    vec3 n = texture(normalMap, texCoord).rgb; // obtain normal vector from normal map in range [0,1], in tangent space
+    n = normalize(n * 2.0 - 1.0); // transform normal vector to range [-1,1]
+    n = normalize(TBN * n);  // rotate into world space, then used by lighting
+
     vec3 albedo = texture(TEXTURE, texCoord).rgb;
 
     // Credit: learned from https://learnopengl.com/Advanced-OpenGL/Cubemaps, https://registry.khronos.org/OpenGL-Refpages/gl4/html/texture.xhtml

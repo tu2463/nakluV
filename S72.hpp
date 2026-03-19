@@ -233,7 +233,11 @@ struct S72 {
     {
         "type":"MATERIAL",
         "name":"boring blue",
-        "normalMap":{ "src":"normal.png" },
+
+        // reference to a 2D texture to use as a tangent-space normal map. Reconstructed normal is TBN * (2*r*g*b - 1), where TBN isthe tangent-space basis.
+        // Not specifying should be the same as specifying a constant (0.5, 0.5, 1) normal map (i.e., all normals point along the N vector of tangent space).
+        "normalMap":{ "src":"normal.png" }, 
+        
         "displacementMap":{ "src":"displacement.png" },
         "pbr":{
             "albedo": [0.5, 0.5, 0.85],
