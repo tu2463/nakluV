@@ -342,7 +342,6 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), textures.back());
 		}
 
-
 		// Now load textures from S72
 		for (auto &[key, s72_texture] : s72.textures) {
 			// Skip textures that failed to load (empty pixels)
@@ -373,7 +372,21 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 					format = VK_FORMAT_R8G8B8A8_SRGB;
 					break;
 				case S72::Texture::Format::linear:
-					format = VK_FORMAT_R8G8B8A8_UNORM; // A2-env-TODO check: what format should this be?
+					/*
+					VK_FORMAT_R8G8B8A8_UNORM:                                                                                                                                                  
+					"Unsigned Normalized" — the GPU hands the shader the raw value linearly scaled to [0,1]:                                                                                    
+					stored byte 128  →  shader reads  128/255 ≈ 0.502                                                                                                                           
+					stored byte 255  →  shader reads  1.0                                                                                                                                       
+					stored byte 0    →  shader reads  0.0                                                                                                                                       
+					
+					VK_FORMAT_R8G8B8A8_SRGB:                                                                                                                                                  
+					The GPU applies sRGB gamma decode before the shader sees the value:                                                                                                         
+					stored byte 128  →  shader reads  ~0.216   (not 0.502!)                                                                                                                   
+					stored byte 255  →  shader reads  1.0                                                                                                                                       
+					stored byte 0    →  shader reads  0.0                                                                                                                                       
+					The curve is nonlinear — dark values get darkened even more.
+					*/
+					format = VK_FORMAT_R8G8B8A8_UNORM; // A2-env-DONE check: what format should this be //vv
 					break;
 				case S72::Texture::Format::rgbe:
 					data = s72_texture.RGBE_floats.data();
@@ -381,6 +394,10 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 					format = cubemap_format;
 					// cubmap has 6 faces stacked vertically in the source image, so per-face height = total height / 6
 					img_height = img_height / 6;
+					if (img_height == 0 || img_width == 0 || s72_texture.RGBE_floats.empty()) {
+						std::cerr << "WARNING: Skipping invalid RGBE texture: " << s72_texture.src << std::endl;
+						continue;
+					}
 					flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 					arrayLayers = 6;
 					layerCount = 6;
@@ -407,7 +424,25 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::cout << "Created " << textures.size() << " GPU textures (including default white)." << std::endl;
 	}
 
-	{ // create texture indices for materials and textures for color albedos
+	{ // create texture indices for materials,  textures for color albedos
+
+		{ // create a dummy normal map
+			uint32_t size = 1;
+
+			// R=128, G=128, B=255, A=255.
+			// Decodes as: (128/255)*2-1 ≈ 0, (128/255)*2-1 ≈ 0, (255/255)*2-1 = 1 => (0,0,1)
+			std::vector<uint32_t> data = {0xFFFF8080};
+
+			normal_maps.emplace_back(rtg.helpers.create_image(
+				VkExtent2D{.width = size, .height = size},
+				normal_map_format,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				Helpers::Unmapped));
+			rtg.helpers.transfer_to_image(data.data(), sizeof(data[0]) * data.size(), normal_maps.back());
+		}
+
 		for (auto &[name, mat] : s72.materials) {
 			uint32_t tex_index = 0; // default white
 
@@ -461,8 +496,31 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				}
 			}
 			// Mirror and Environment materials use default white (tex_index = 0)
-
 			material_albedo_map[&mat] = tex_index;
+
+			if (mat.normal_map != nullptr) { // make image view for normal map
+				if (normal_index_map.contains(mat.normal_map)) continue;
+
+				S72::Texture &normal_map = *mat.normal_map;
+				if (normal_map.pixels.empty() || normal_map.width == 0 || normal_map.height == 0) { 
+					std::cerr << "WARNING: Skipping normal map with empty pixels: " << normal_map.src << std::endl;
+					continue;
+				}
+				
+				uint32_t nm_index = static_cast<uint32_t>(normal_maps.size());
+
+				normal_maps.emplace_back(rtg.helpers.create_image(
+					VkExtent2D{.width = static_cast<uint32_t>(normal_map.width), .height = static_cast<uint32_t>(normal_map.height)},
+					normal_map_format,
+					VK_IMAGE_TILING_OPTIMAL,
+					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+					Helpers::Unmapped));
+
+				rtg.helpers.transfer_to_image(normal_map.pixels.data(), normal_map.pixels.size(), normal_maps.back());
+				normal_index_map[mat.normal_map] = nm_index;
+			}
+
 		}
 		std::cout << "Mapped " << material_albedo_map.size() << " materials to texture indices." << std::endl;
 	}
@@ -533,6 +591,38 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			== textures.size());
 	}
 
+	{ // make image views for each normal map image
+		for (int i = 0; i < normal_maps.size(); i++) {
+			Helpers::AllocatedImage const &image = normal_maps[i];
+			VkImageViewCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.flags = 0,
+				.image = image.handle,		   // The underlying VkImage handle this view refers to.
+				.viewType = VK_IMAGE_VIEW_TYPE_2D, // treat the image as a standard 2D texture.
+				.format = image.format,	   // Use the same format the image was created with
+				.subresourceRange{
+					// Specifies which part of the image to view:
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // this is a color image (not depth/stencil).
+					.baseMipLevel = 0,
+					.levelCount = 1, // only the base mip level (no mipmaps).
+					.baseArrayLayer = 0,
+					.layerCount = 1u, // 1 layer for non-array texture
+				},
+			};
+
+			VkImageView image_view = VK_NULL_HANDLE;
+			// creates the view and stores the handle in the local image_view variable:
+			VK(vkCreateImageView(
+				rtg.device,
+				&create_info,
+				nullptr,
+				&image_view));
+
+			normal_map_views.emplace_back(image_view);
+		}
+		assert(normal_map_views.size() == normal_maps.size());
+	}
+
 	{ // make a sampler for the textures
 		VkSamplerCreateInfo create_info {
 			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -560,18 +650,19 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		
 	{ // create the texture descriptor pool
 		uint32_t per_texture = uint32_t(textures.size()); // for easier-to-read counting
+		uint32_t per_normal_map = uint32_t(normal_maps.size()); // A2-normal
 
 		std::array< VkDescriptorPoolSize, 1 > pool_sizes{ // tells Vulkan how much memory to reserve in the pool, categorized by type
 			VkDescriptorPoolSize{ // total number of individual descriptors available, categorized by type 
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.descriptorCount = per_texture + 2, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap
+				.descriptorCount = per_texture + 2 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map
 			},
 		};
 
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = per_texture + 2, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap
+			.maxSets = per_texture + 2 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(), // total number of individual descriptors available, categorized by type   
 		};
@@ -626,7 +717,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		);
 	}
 
-	if (lambertian_cubemap_view != VK_NULL_HANDLE) { // allocate and write the lambertian cubemap descriptor set (set=4)
+	if (lambertian_cubemap_view != VK_NULL_HANDLE) { // allocate and write the lambertian cubemap descriptor set (set=4) 
 		VkDescriptorSetAllocateInfo alloc_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 			.descriptorPool = texture_descriptor_pool,
@@ -686,7 +777,49 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		vkUpdateDescriptorSets(
 			rtg.device,
 			uint32_t(writes.size()), // descriptorWrites count
-			writes.data(), // descriptorWrites
+			writes.data(), // descriptorWrites	
+			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
+		);
+	}
+
+	{ // allocate and write the normal map descriptor set
+		VkDescriptorSetAllocateInfo alloc_info {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = texture_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &objects_pipeline.set5_NormalMap,
+		};
+		normal_map_descriptors.assign(normal_maps.size(), VK_NULL_HANDLE); // .resize() preserves the existing elements; .assign() discards all existign elements
+		for (size_t i = 0; i < normal_maps.size(); i++) {
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &normal_map_descriptors[i]) );
+		}
+
+		// write descriptors:
+		std::vector< VkDescriptorImageInfo > infos(normal_map_views.size());
+		std::vector< VkWriteDescriptorSet > writes(normal_map_views.size());
+
+		size_t view_i = 0;
+		for (size_t tex_i = 0; tex_i < normal_maps.size(); tex_i++) {
+			infos[view_i] = VkDescriptorImageInfo{
+				.sampler = texture_sampler,// how to sample (filtering, wrapping, etc.) 
+				.imageView = normal_map_views[view_i], // which normal_map image to sample from; view_i tracks position in normal_map_views
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
+			};
+			writes[view_i] = VkWriteDescriptorSet{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = normal_map_descriptors[tex_i], // which descriptor set to update; tex_i is the normal_maps index (matches inst.normal_map)
+				.dstBinding = 0,// binding index within that set (matches layout)
+				.dstArrayElement = 0,// starting array index (for arrayed bindings) 
+				.descriptorCount = 1,// updating 1 descriptor
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
+				.pImageInfo = &infos[view_i],
+			};
+			view_i++;
+		}
+
+		vkUpdateDescriptorSets(
+			rtg.device,
+			uint32_t(writes.size()), writes.data(), // descriptorWrites count, descriptorWrites
 			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
 		);
 	}
@@ -705,6 +838,7 @@ Tutorial::~Tutorial() {
 
 		// this also frees the descriptor sets allocated from the pool:
 		texture_descriptors.clear();
+		normal_map_descriptors.clear();
 	}
 
 	if (texture_sampler) {
@@ -717,6 +851,12 @@ Tutorial::~Tutorial() {
 		view = VK_NULL_HANDLE;
 	}
 	texture_views.clear();
+
+	for (VkImageView &view : normal_map_views) {
+      vkDestroyImageView(rtg.device, view, nullptr);
+      view = VK_NULL_HANDLE;
+  }
+  normal_map_views.clear();
 
 	if (cubemap_view != VK_NULL_HANDLE) {
 		vkDestroyImageView(rtg.device, cubemap_view, nullptr);
@@ -732,6 +872,11 @@ Tutorial::~Tutorial() {
 		rtg.helpers.destroy_image(std::move(texture));
 	}
 	textures.clear();
+
+	  for (auto &image : normal_maps) {
+      rtg.helpers.destroy_image(std::move(image));
+  }
+  normal_maps.clear();
 
 	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it, like the other checks //vv the type is AllocatedBuffer, is a struct that wraps the handle; the destroy_buffer function can take care of checking whether the handle is null
 
@@ -1350,29 +1495,31 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		// - Now you switch to the objects pipeline with vkCmdBindPipeline
 		// - You don't need to rebind the camera descriptor set!
 
-		// bind cubemap descriptor set (only when a cubemap exists in the scene)
-		if (cubemap_view != VK_NULL_HANDLE) {
-			vkCmdBindDescriptorSets(
-				workspace.command_buffer, // command buffer
-				VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
-				objects_pipeline.layout, // pipeline layout
-				3, // set=3: radiance cubemap (mirror / environment material)
-				1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
-				0, nullptr // dynamic offsets count, ptr
-			);
-		}
-		// bind lambertian cubemap at slot 4
-		if (lambertian_cubemap_view != VK_NULL_HANDLE) {
+		// bind cubemap descriptor set. cubemap_descriptors is always valid because
+		// the fallback 1x1 black cubemap ensures it's created even with no scene environment
+		vkCmdBindDescriptorSets(
+			workspace.command_buffer, // command buffer
+			VK_PIPELINE_BIND_POINT_GRAPHICS, // pipeline bind point
+			objects_pipeline.layout, // pipeline layout
+			3, // set=3: radiance cubemap (mirror / environment material)
+			1, &cubemap_descriptors, // descriptor sets count, ptr (which descriptor set to put in slot 3)
+			0, nullptr // dynamic offsets count, ptr
+		);
+		// bind lambertian cubemap at slot 4; BUG: only bound when view != NULL. but frag shader always expects lambertianCubeMap
+		// if (lambertian_cubemap_view != VK_NULL_HANDLE) {
+		{ // FIX: always bind set 4, fallback to cubemap_descriptors if no lambertian exists (i.e. either no environment obj at all, or the env obj only has a radiance map, no lambertian)
+			VkDescriptorSet final_lambertian_cubemap_descriptors = (lambertian_cubemap_view != VK_NULL_HANDLE)
+												  ? lambertian_cubemap_descriptors
+												  : cubemap_descriptors;
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer,
 				VK_PIPELINE_BIND_POINT_GRAPHICS,
 				objects_pipeline.layout,
 				4, // set=4: prefiltered irradiance cubemap (lambertian material)
-				1, &lambertian_cubemap_descriptors,
-				0, nullptr
+				1, &final_lambertian_cubemap_descriptors,
+				0, nullptr // dynamic offsets count, ptr
 			);
 		}
-
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
 			{ // push material_type:
@@ -1409,6 +1556,21 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				objects_pipeline.layout, // pipeline layout
 				2, // set number (slot 2)   
 				1, &texture_descriptors[inst.texture], // descriptor sets count, ptr (which descriptor set to put in slot 2)
+				0, nullptr // dynamic offsets count, ptr
+			);
+
+			// bind normal map at slot 5
+			S72::Material *material = inst.mesh->material;
+			VkDescriptorSet final_normal_map_descriptors = material->normal_map
+															   ? normal_map_descriptors[normal_index_map[material->normal_map]]
+															   : normal_map_descriptors[0];
+
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				objects_pipeline.layout,
+				5, // set=5
+				1, &final_normal_map_descriptors,
 				0, nullptr // dynamic offsets count, ptr
 			);
 

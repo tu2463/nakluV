@@ -73,6 +73,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set2_TEXTURE;
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE;
 
 		// types for descriptors:
 		struct World {
@@ -167,16 +168,24 @@ struct Tutorial : RTG::Application {
 	// ObjectVertices torus_vertices;
 
 	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
+	std::vector< Helpers::AllocatedImage > normal_maps; // holds actual image data
+
 	std::vector< VkImageView > texture_views;
+	std::vector< VkImageView > normal_map_views;
 	VkImageView cubemap_view = VK_NULL_HANDLE;
 	VkImageView lambertian_cubemap_view = VK_NULL_HANDLE; // A2-diffuse
+
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
+
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
+	std::vector< VkDescriptorSet>  normal_map_descriptors;
 	VkDescriptorSet cubemap_descriptors = VK_NULL_HANDLE; // allocated from texture_descriptor_pool; include a descriptor for the cube map
-	VkDescriptorSet lambertian_cubemap_descriptors = VK_NULL_HANDLE; // A2-diffuse
+	VkDescriptorSet lambertian_cubemap_descriptors = VK_NULL_HANDLE;
+
 	std::unordered_map< S72::Texture*, uint32_t > texture_index_map; // maps S72 texture pointers to texture indices
 	std::unordered_map< S72::Material*, uint32_t > material_albedo_map; // maps materials to their albedo texture index
+	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
 
 	/* A2-env
 	You must use a pixel format for environment images which can support high dynamic range.
@@ -185,6 +194,7 @@ struct Tutorial : RTG::Application {
 	though you will need to be careful to correctly clamp under- and over-flowing values when translating.
 	*/
 	VkFormat cubemap_format = VK_FORMAT_R32G32B32A32_SFLOAT; // TODO: see if we can use less wasteful format; if changed, also update process_textures
+	VkFormat normal_map_format = VK_FORMAT_R8G8B8A8_UNORM;
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:

@@ -39,9 +39,10 @@ void main() {
     gl_Position = TRANSFORMS[gl_InstanceIndex].CLIP_FROM_LOCAL * vec4(Position, 1.0);
     position = mat4x3(TRANSFORMS[gl_InstanceIndex].WORLD_FROM_LOCAL) * vec4(Position, 1.0);
     normal = normalize(mat3(TRANSFORMS[gl_InstanceIndex].WORLD_FROM_LOCAL_NORMAL) * Normal);
-    tangent = normalize(vec3(TRANSFORMS[gl_InstanceIndex].WORLD_FROM_LOCAL * Tangent));
+    tangent = normalize(mat3(TRANSFORMS[gl_InstanceIndex].WORLD_FROM_LOCAL) * Tangent.xyz);
 
     // Credit: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html: 
     //         The bitangent vectors MUST be computed by taking the cross product of the normal and tangent XYZ vectors and multiplying it against the W component of the tangent: bitangent = cross(normal.xyz, tangent.xyz) * tangent.w.
     bitangent = cross(normal, tangent) * Tangent.w;
+    texCoord = TexCoord;
 }

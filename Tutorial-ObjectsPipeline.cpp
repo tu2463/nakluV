@@ -109,6 +109,25 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set4_LambertianCubeMap) );
 	}
 
+	{ // the set5_NormalMap layout has a single descriptor for a sampler2D used in the fragment shader:
+		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // because a GLSL sampler2D references both an image and the parameters for how to sample from that image.
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT // fragment stage
+			},
+		};
+
+		VkDescriptorSetLayoutCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set5_NormalMap) );
+	}
+
 	{ // create pipeline layout; why do we need blocks like this in C++ //vv simple syntax
 		VkPushConstantRange range{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -116,12 +135,13 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.size = sizeof(Push),
 		};
 
-		std::array< VkDescriptorSetLayout, 5 > layouts{
+		std::array< VkDescriptorSetLayout, 6 > layouts{
 			set0_World,
 			set1_Transforms,
 			set2_TEXTURE,
 			set3_CubeMap,
 			set4_LambertianCubeMap,
+			set5_NormalMap,
 		};
 		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //vv
@@ -271,6 +291,11 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set4_LambertianCubeMap != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set4_LambertianCubeMap, nullptr);
 		set4_LambertianCubeMap = VK_NULL_HANDLE;
+	}
+
+	if (set5_NormalMap != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set5_NormalMap, nullptr);
+		set5_NormalMap = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {
