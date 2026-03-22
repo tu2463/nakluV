@@ -51,7 +51,8 @@ void main() {
     // Basic hemispherical lighting equation in glsl syntax, where: n is the per-pixel normal (remember to normalize after interpolation!); texCoord is the interpolated texture coordinate; *_DIRECTION are uniforms giving the light directions; *_ENERGY are uniforms giving the light energy in appropriate units; ALBEDO is the albedo texture; and outColor is the value that gets written to the framebuffer.
     // vec3 n = normalize(normal);
     vec3 n = texture(normalMap, texCoord).rgb; // obtain normal vector from normal map in range [0,1], in tangent space
-    n = normalize(n * 2.0 - 1.0); // transform normal vector to range [-1,1]
+    n = normalize(n * 2.0 - 1.0); // transform normal vector to range [-1,1]. Need this because texture colors are stored in [0, 1], but directions need to be in [-1, 1].
+                                  // A normal map can't store negative numbers as raw bytes. The encoding happens when the normal map texture is created — typically by an artist tool or texture baking software 
     n = normalize(TBN * n);  // rotate into world space, then used by lighting
 
     vec3 albedo = texture(TEXTURE, texCoord).rgb;

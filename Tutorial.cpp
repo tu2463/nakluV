@@ -511,7 +511,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 
 				normal_maps.emplace_back(rtg.helpers.create_image(
 					VkExtent2D{.width = static_cast<uint32_t>(normal_map.width), .height = static_cast<uint32_t>(normal_map.height)},
-					normal_map_format,
+					normal_map_format, // VK_FORMAT_R8G8B8A8_UNORM
 					VK_IMAGE_TILING_OPTIMAL,
 					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,

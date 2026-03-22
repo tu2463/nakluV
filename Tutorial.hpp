@@ -194,6 +194,17 @@ struct Tutorial : RTG::Application {
 	though you will need to be careful to correctly clamp under- and over-flowing values when translating.
 	*/
 	VkFormat cubemap_format = VK_FORMAT_R32G32B32A32_SFLOAT; // TODO: see if we can use less wasteful format; if changed, also update process_textures
+
+	/* A2-normal
+	Normal maps store direction vectors, not colors. Each RGB texel encodes an XYZ direction as:
+	stored byte → shader value
+			0   → 0/255 ≈ 0.0
+			128 → 128/255 ≈ 0.502
+			255 → 255/255 = 1.0
+	Then the shader expands it: direction = rgb * 2.0 - 1.0 → [-1, 1]. A flat normal (0, 0, 1) is stored as (128, 128, 255).
+	Why not SRGB? because _SRGB apply gamma decode before the shader reads the value, making the value non-linear, resulting in incorrect normal direction. 
+	SRGB is only correct for color textures because those were painted by artists in the sRGB color space and need gamma decoding to get back to linear light values.
+	*/
 	VkFormat normal_map_format = VK_FORMAT_R8G8B8A8_UNORM;
 
 	//--------------------------------------------------------------------
