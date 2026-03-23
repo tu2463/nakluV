@@ -3,7 +3,7 @@
 #include "Helpers.hpp"
 #include "VK.hpp"
 
-static uint32_t cube_code[] =
+static uint32_t cube_lambertian_code[] =
 #include "spv/cube.comp.lambertian.inl"
 ;
 
@@ -19,11 +19,18 @@ static uint32_t cube_code[] =
   - cube.comp.lambertian — prefilters the environment map for diffuse irradiance (used for the diffuse lighting term)
   - cube.comp.ggx — prefilters for specular reflections at various roughness levels (used for the specular term in split-sum approximation)
 */
-// #include "spv/cube.comp.ggx.inl"
+static uint32_t cube_ggx_code[] =
+#include "spv/cube.comp.ggx.inl"
+;
 
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
-void CubePipeline::create(RTG &rtg) {
-    VkShaderModule module = rtg.helpers.create_shader_module(cube_code);
+void CubePipeline::create(RTG &rtg, Mode mode) {
+    VkShaderModule module;
+    if (mode == Mode::Lambertian) {
+        module = rtg.helpers.create_shader_module(cube_lambertian_code);
+    } else {
+        module = rtg.helpers.create_shader_module(cube_ggx_code);
+    }
    
     { // create the descriptor set layout  - set0_in layout holds input face info
         std::array< VkDescriptorSetLayoutBinding, 2 > bindings{

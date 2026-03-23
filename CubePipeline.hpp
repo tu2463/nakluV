@@ -16,8 +16,10 @@ struct CubePipeline {
             set2_params,
         };
     */
+    enum class Mode { Lambertian, GGX };
+
     VkDescriptorSetLayout set01_face = VK_NULL_HANDLE;
-    VkDescriptorSetLayout set2_params = VK_NULL_HANDLE;
+	VkDescriptorSetLayout set2_params = VK_NULL_HANDLE; //used for ggx only
 
     // types for descriptors:
     struct Face
@@ -35,12 +37,15 @@ struct CubePipeline {
     };
     static_assert(sizeof(Face) == (3*4)*4, "Face descriptor structure is the expected size");
 
-    // no push constants
+    struct Params {
+		float roughness;
+	};
+	static_assert(sizeof(Params) == 4, "Params descriptor is the expected size.");
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
 
     VkPipeline handle = VK_NULL_HANDLE;
 
-    void create(RTG &);
+    void create(RTG &, Mode mode = Mode::Lambertian);
     void destroy(RTG &);
 };

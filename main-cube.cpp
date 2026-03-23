@@ -281,15 +281,16 @@ int main (int argc, char **argv) {
 		// loads vulkan library, creates surface, initializes helpers:
 		RTG rtg(configuration); // Creates an RTG object named rtg; Passes configuration as a parameter to the constructor
 
-        // create CubePipeline
+        // create CubePipeline — mode is GGX if --ggx was passed, otherwise Lambertian
+        CubePipeline::Mode mode = !configuration.ggx_out_file.empty() ? CubePipeline::Mode::GGX : CubePipeline::Mode::Lambertian;
         CubePipeline cube_pipeline;
-        cube_pipeline.create(rtg);
+        cube_pipeline.create(rtg, mode);
 
         // Load image using stb_image
         if (configuration.in_file.empty())
-            throw std::runtime_error("No input file given. Usage: cube in.png --lambertian out.png");
-        if (configuration.out_file.empty())
-            throw std::runtime_error("No output file given. Usage: cube in.png --lambertian out.png");
+            throw std::runtime_error("No input file given. Usage: cube in.png --lambertian out.png OR cube in.png --ggx out.png");
+        if (configuration.lambertian_out_file.empty() && configuration.ggx_out_file.empty())
+            throw std::runtime_error("No output file given. Usage: cube in.png --lambertian out.png OR cube in.png --ggx out.png");
 
         int in_w, in_h, channels;
         /* c_str returns a const char* pointer to the underlying null-terminated C string of a std::string
@@ -407,6 +408,50 @@ int main (int argc, char **argv) {
         }
         std::cout << "Created " << faces.size() << " faces" << std::endl;
 
+        Helpers::AllocatedBuffer params_buffer;
+        VkDescriptorSet params_descriptors = VK_NULL_HANDLE;
+        if (mode == CubePipeline::Mode::GGX) { // params buffer and descriptors
+            params_buffer = rtg.helpers.create_buffer(
+                sizeof(CubePipeline::Params),
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                Helpers::Unmapped
+            );
+            // CubePipeline::Params params{ .roughness = 0.5f }; // TODO: this is placeholder, should add more mip levels
+            CubePipeline::Params params{ .roughness = 0.0f };
+            // CubePipeline::Params params{ .roughness = 1.0f };
+            rtg.helpers.transfer_to_buffer(&params, sizeof(params), params_buffer);
+
+            { // descriptor set with the params uniform
+                { // allocate
+                    VkDescriptorSetAllocateInfo alloc_info{
+                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                        .descriptorPool = descriptor_pool,
+                        .descriptorSetCount = 1,
+                        .pSetLayouts = &cube_pipeline.set2_params,
+                    };
+                    VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &params_descriptors) );
+                }
+                { //write               
+                    VkDescriptorBufferInfo buffer_info{
+                        .buffer = params_buffer.handle,
+                        .offset = 0,
+                        .range = params_buffer.size,
+                    };
+                    VkWriteDescriptorSet write{
+                        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                        .descriptorCount = 1,
+                        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                        .dstArrayElement = 0, // Starting array index within the binding — 0 since this isn't an array descriptor
+                        .dstBinding = 0, // corresponds to the binding = N number delcared in shader AND in the VkDescriptorSetLayoutBinding in CubePipeline.cpp
+                        .dstSet = params_descriptors, // write to this descriptor set
+                        .pBufferInfo = &buffer_info,
+                    };
+                    vkUpdateDescriptorSets(rtg.device, 1, &write, 0, nullptr);
+                }
+            }
+        }
+
         { // run pipeline
             /*
             write a sequence of commands into a CPU-side buffer:
@@ -431,10 +476,15 @@ int main (int argc, char **argv) {
             { // Bind in/out descriptor sets
                 for (int out_f = 0; out_f < 6; out_f++) {
                     for (int in_f = 0; in_f < 6; in_f++) { // each out_face integrates over all incoming directions above the surface, thus need to sample ALL 6 in_faces
-                        std::array<VkDescriptorSet, 2> descriptor_sets;
-                        descriptor_sets[0] = faces[in_f * 2].descriptors;
-                        descriptor_sets[1] = faces[out_f * 2 + 1].descriptors;
-                        // TODO: add params_descriptors to descriptor_sets
+                        // Lambertian needs 2 sets (in_face, out_face).
+                        // GGX needs 3 sets (in_face, out_face, params with roughness).
+                        std::vector<VkDescriptorSet> descriptor_sets = {
+                            faces[in_f * 2].descriptors,
+                            faces[out_f * 2 + 1].descriptors,
+                        };
+                        if (mode == CubePipeline::Mode::GGX) {
+                            descriptor_sets.push_back(params_descriptors);
+                        }
 
                         vkCmdBindDescriptorSets( // tells GPU which images/buffers the shader reads/writes
                             command_buffer,                                           // command buffer
@@ -568,16 +618,29 @@ int main (int argc, char **argv) {
             // it holds 6 faces × OUT_SIZE × OUT_SIZE pixels, each pixel as glm::vec4
             glm::vec4* out_pixels_floats = reinterpret_cast<glm::vec4*>(out_pixels_buffer.allocation.data());
             std::vector<glm::u8vec4> rgbe_out(out_w * out_h);
-            for (int i = 0; i < rgbe_out.size(); i++) {
-                rgbe_out[i] = float_to_rgbe(glm::vec3(out_pixels_floats[i]));
+            for (int i = 0; i < (int)rgbe_out.size(); i++) {
+                glm::vec4 p = out_pixels_floats[i];
+                glm::vec3 color;
+                if (mode == CubePipeline::Mode::GGX) {
+                    // rgb holds prefiltered_color = sum(Li * NdotL) across all 6 face passes.
+                    // alpha holds total_weight = sum(NdotL) across all 6 face passes.
+                    // do prefiltered_color/total_weight to normalize.
+                    color = (p.a > 0.0f) ? glm::vec3(p) / p.a : glm::vec3(0.0f);
+                } else {
+                    color = glm::vec3(p);
+                }
+                rgbe_out[i] = float_to_rgbe(color);
             }
+            std::string out_file = (mode == CubePipeline::Mode::GGX)
+                ? configuration.ggx_out_file
+                : configuration.lambertian_out_file;
             int write_ok = stbi_write_png(
-                configuration.out_file.c_str(), out_w, out_h, 
+                out_file.c_str(), out_w, out_h,
                 4, // channel (RGBA)
                 rgbe_out.data(),
                 out_w * 4 // stride = # of bytes/row = (# of pixels/row) * (# of bytes/pixel) = out_w * 4
             );
-            if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + configuration.out_file + "'.");
+            if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + out_file + "'.");
         }
         
         // destroy all the things
@@ -588,6 +651,10 @@ int main (int argc, char **argv) {
         if (out_pixels_buffer.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(out_pixels_buffer));
 		}
+
+        if (params_buffer.handle != VK_NULL_HANDLE) {
+            rtg.helpers.destroy_buffer(std::move(params_buffer));
+        }
 
         vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
         descriptor_pool = VK_NULL_HANDLE;

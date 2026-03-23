@@ -169,14 +169,12 @@ void main() {
                 vec3 Li = imageLoad(inFace, ivec2(px_float, py_float)).rgb;                                                                                                                                                                                          
 
                 prefiltered_color += Li * NdotL; // radiance from inFace
-                total_weight += NdotL;
+                total_weight += NdotL; // samples with less influence on the final result (for small NdotL) contribute less to the final weight
         }
     }
 
-    prefiltered_color = prefiltered_color / total_weight;
-
-    // Accumulate this face's sums into the output image.
-    vec3 prevAcc = imageLoad(outFace, outCoord).rgb;
-    imageStore(outFace, outCoord, vec4(prefiltered_color + prevAcc, 0.0)); // prefiltered_color is for current face, prevAcc is for all prev faces
+    // main-cube.cpp divides rgb / alpha at readback to produce the final normalized color.
+    vec4 prev = imageLoad(outFace, outCoord);
+    imageStore(outFace, outCoord, vec4(prefiltered_color + prev.rgb, total_weight + prev.a));
     #endif
 }

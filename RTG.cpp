@@ -87,7 +87,11 @@ void RTG::Configuration::parse(int argc, char **argv) {
 		} else if (arg == "--lambertian" ) {
 			if (argi + 1 >= argc) throw std::runtime_error("--lambertian requires an output filename.");
 			argi += 1;
-			out_file = argv[argi];
+			lambertian_out_file = argv[argi];
+		} else if (arg == "--ggx" ) {
+			if (argi + 1 >= argc) throw std::runtime_error("--ggx requires an output filename.");
+			argi += 1;
+			ggx_out_file = argv[argi];
 		} else if (in_file.empty()) {
 			in_file = arg;
 		} else {

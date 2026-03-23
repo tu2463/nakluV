@@ -94,7 +94,8 @@ struct RTG {
 
 		// A2-diffuse
 		std::string in_file;
-		std::string out_file;
+		std::string lambertian_out_file;
+		std::string ggx_out_file; // A2-pbr
 
 		// A2-tone
 		int exposure = 0;
