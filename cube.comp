@@ -17,11 +17,66 @@ layout(set=1, binding=0, std140) uniform OutFace {
 };
 layout(set=1, binding=1, rgba32f) uniform restrict image2D outFace;
 
+const float PI = 3.14159265358979323846;
+
+#ifdef GGX
+layout(set=2, binding=0, std140) uniform Roughness { // use std140: uniform blocks have a standard cross-platform cross-vendor layout. Unused uniforms will not be eliminated. Credit: https://stackoverflow.com/questions/16270846/when-should-i-use-std140-in-opengl
+    float roughness;
+};
+
+// Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+
+// Generates a GGX-distributed half-vector H in world space around normal N,
+// given a 2D uniform sample Xi and roughness.
+// α = roughness² follows the Disney/Karis squared-roughness convention.
+// Credit: Karis 2013 Listing 2, LearnOpenGL https://learnopengl.com/PBR/IBL/Specular-IBL
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float Roughness) {
+    // Note that Epic Games uses the squared roughness for better visual results as based on Disney's original PBR research.
+    float a = Roughness * Roughness;
+
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+
+    // from spherical coordinates to cartesian coordinates (tangent space)
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    // from tangent-space vector to world-space sample vector
+    vec3 up        = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+
+// Credit: https://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+// Generates a quasi-random low-discrepancy value in [0,1) by bit-reversing i.
+float RadicalInverse_VdC(uint bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+// Returns the i-th point in the Hammersley 2D low-discrepancy sequence over N total samples.
+vec2 Hammersley(uint i, uint N) {
+    return vec2(float(i)/float(N), RadicalInverse_VdC(i));
+}
+#endif
+
 void main() {
-    // - uvec3 gl_GlobalInvocationID = global index of the current work item = (gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID)
-    // -- uvec3 gl_LocalInvocationID = index of the current work item in the work group
-    // -- unvec3 gl_WorkGroupID and uvec3 gl_WorkGroupSize = index and size of of the work group (local size) operated on defined with layout
-    // - The user can use a concept called work groups to define the space the compute shader is operating on. Work Groups are the smallest amount of compute operations that the user can execute
+    /*
+    uvec3 gl_GlobalInvocationID = global index of the current work item = (gl_WorkGroupID * gl_WorkGroupSize + gl_LocalInvocationID)
+    - uvec3 gl_LocalInvocationID = index of the current work item in the work group
+    - unvec3 gl_WorkGroupID and uvec3 gl_WorkGroupSize = index and size of of the work group (local size) operated on defined with layout
+    The user can use a concept called work groups to define the space the compute shader is operating on. Work Groups are the smallest amount of compute operations that the user can execute
+    */
     ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy); // this answers: which output pixel is this code responsible for?
 
     // imageSize: retrieve the dimensions of an image. Returns ivec2 for 2D image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageSize.xhtml
@@ -32,11 +87,14 @@ void main() {
 
     // pixel (px, py)  -> multiply by WORLD_FROM_PX  -> world-space direction vector
     vec3 n = normalize(WORLD_FROM_OUT_PX * vec3(float(outCoord.x), float(outCoord.y), 1.0));
-    
-    // emitted light = integrate over all incoming radiance
-    // accumulate contribution from every pixel of this inFace
-    // to build up the irradiance at surface normal n
-    // i.e. the total light arriving at a surface patch facing direction n
+
+    #ifdef LAMBERTIAN
+    /*
+    emitted light = integrate over all incoming radiance
+    accumulate contribution from every pixel of this inFace
+    to build up the irradiance at surface normal n
+    i.e. the total light arriving at a surface patch facing direction n
+    */
     vec3 acc = vec3(0.0);
 
     //                    Li(ωi) = incoming radiance from direction ωi = color stored in the input cubemap face at pixel(x, y)
@@ -44,7 +102,6 @@ void main() {
     //                                              dΩ weights each light sample by how much of
     // irradiance(n) = Σ  Li(ωi) · max(n · ωi, 0) · dΩ(ωi)
     //                 {all input pixels}
-
 
     // Credit: Prof Jim's texel-area.js from https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/More.20on.20Texel.20Areas/with/575171358
     float area = (4.0 / float(inSize.x * inSize.x)); // one pixel of area on the cube surface; the cube face spans [-1, 1] × [-1, 1], total area = 4
@@ -55,6 +112,7 @@ void main() {
             // imageLoad: load a single texel from an image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageLoad.xhtml
             vec3 Li = imageLoad(inFace, ivec2(x, y)).rgb;
 
+            // WORLD_FROM_IN_PX does: (px, py, 1) -> world_dir_unnormalized
             vec3 in_dir = WORLD_FROM_IN_PX * vec3(float(x), float(y), 1.0); // not normalized yet
             float cos_theta = max(0.0, dot(n, normalize(in_dir)));
 
@@ -64,18 +122,61 @@ void main() {
             float face_dist_sq = s*s + t*t + 1.0; // = x2 + y2 + z2 = squared dist from the origin to the point (s, t, u), u = 1 (face sits on plane with depth = 1) on the cube face plane
 
             float dir_omega = area * pow(face_dist_sq, -1.5); // dΩ(ωi)
-            
+
             acc += Li * cos_theta * dir_omega;
         }
     }
-    
+
     // vec3 acc = imageLoad(inFace, outCoord).rgb; // test: copy in -> out
-    const float PI = 3.14159265358979323846;  
     vec3 prevAcc = imageLoad(outFace, outCoord).rgb;
 
-    // The imageStore function takes: 
-    // - the image unit to write to as first argument, 
-    // - the absolute texel coordinate as second argument, and 
+    // The imageStore function takes:
+    // - the image unit to write to as first argument,
+    // - the absolute texel coordinate as second argument, and
     // - the data value to store at this texel as third.
     imageStore(outFace, outCoord, vec4((acc / PI) + prevAcc, 0.0)); // acc is for current face, prevAcc is for all prev faces
+    #endif
+
+    #ifdef GGX
+    /*
+    Instead of uniformly or randomly (Monte Carlo) generating sample vectors over the integral's hemisphere, 
+    we'll generate sample vectors biased towards the general reflection orientation of the microsurface halfway vector based on the surface's roughness.
+    Process: begin a large loop, generate a random (low-discrepancy) sequence value, take the sequence value to generate a sample vector in tangent space, transform to world space, and sample the scene's radiance
+    */
+
+    vec3 N = n; // output pixel direction
+    vec3 V = n; // split-sum approximation: view = reflection = normal
+
+    vec3 prefiltered_color  = vec3(0.0);
+    float total_weight = 0.0;
+
+    const uint SAMPLE_COUNT = 1024u;
+    mat3x3 IN_PX_FROM_WORLD = inverse(WORLD_FROM_IN_PX);
+
+    for (uint i = 0u; i < SAMPLE_COUNT; i++) {
+        vec2 Xi = Hammersley(i, SAMPLE_COUNT);
+        vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = clamp(dot(N, L), 0.0, 1.0);
+        if (NdotL > 0.0) {
+                // logic equivalent for: texture(envMap, L).rgb
+                vec3 in_dir = IN_PX_FROM_WORLD * L; // WORLD_FROMIN_PX_FROM_WORLD_IN_PX does: world_dir_unnormalized -> (px * k, py * k, 1 * k)
+                if (in_dir.z <= 0) continue; // dir is behind the face
+                float px_float = in_dir.x / in_dir.z;
+                float py_float = in_dir.y / in_dir.z;
+                if (px_float < 0.0 || px_float >= float(inSize.x) || py_float < 0.0 || py_float >= float(inSize.y)) continue; // does not hit current face                                                                                     
+                vec3 Li = imageLoad(inFace, ivec2(px_float, py_float)).rgb;                                                                                                                                                                                          
+
+                prefiltered_color += Li * NdotL; // radiance from inFace
+                total_weight += NdotL;
+        }
+    }
+
+    prefiltered_color = prefiltered_color / total_weight;
+
+    // Accumulate this face's sums into the output image.
+    vec3 prevAcc = imageLoad(outFace, outCoord).rgb;
+    imageStore(outFace, outCoord, vec4(prefiltered_color + prevAcc, 0.0)); // prefiltered_color is for current face, prevAcc is for all prev faces
+    #endif
 }

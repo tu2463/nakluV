@@ -17,6 +17,7 @@ struct CubePipeline {
         };
     */
     VkDescriptorSetLayout set01_face = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set2_params = VK_NULL_HANDLE;
 
     // types for descriptors:
     struct Face

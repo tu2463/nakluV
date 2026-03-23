@@ -281,7 +281,7 @@ int main (int argc, char **argv) {
 		// loads vulkan library, creates surface, initializes helpers:
 		RTG rtg(configuration); // Creates an RTG object named rtg; Passes configuration as a parameter to the constructor
 
-        // TODO: create CubePipeline
+        // create CubePipeline
         CubePipeline cube_pipeline;
         cube_pipeline.create(rtg);
 

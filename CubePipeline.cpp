@@ -49,19 +49,29 @@ void CubePipeline::create(RTG &rtg) {
         VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set01_face) );
     }
 
-    // ---
-    // Section 4 — create(): descriptor set layout for params (set2_params)
+    { // the set2 layout holds roughness info (and maybe more brdf params in the future):
+        std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+            VkDescriptorSetLayoutBinding{
+                .binding = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            },
+        };
 
-    //     { // set2: roughness UBO at binding=0
-    //         std::array<VkDescriptorSetLayoutBinding, 1> bindings{ ... };
-    //         VK( vkCreateDescriptorSetLayout(..., &set2_params) );
-    //     }
-    // Just one binding: binding = 0 → VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER (the Params / roughness value).
+        VkDescriptorSetLayoutCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = uint32_t(bindings.size()),
+            .pBindings = bindings.data(),
+        };
+        VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set2_params) );
+    }
 
     { // create pipeline layout
-        std::array< VkDescriptorSetLayout, 2> layouts = {
+        std::array< VkDescriptorSetLayout, 3> layouts = {
            set01_face,
            set01_face,
+           set2_params,
         };
         VkPipelineLayoutCreateInfo create_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -101,7 +111,14 @@ void CubePipeline::destroy(RTG &rtg) {
         vkDestroyPipelineLayout(rtg.device, layout, nullptr);
         layout = VK_NULL_HANDLE;
     }
-    if (set01_face != VK_NULL_HANDLE) {
+
+    if (set2_params != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(rtg.device, set2_params, nullptr);
+        set2_params = VK_NULL_HANDLE;
+    }
+
+    if (set01_face != VK_NULL_HANDLE)
+    {
         vkDestroyDescriptorSetLayout(rtg.device, set01_face, nullptr);
         set01_face = VK_NULL_HANDLE;
     }
