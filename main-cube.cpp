@@ -310,18 +310,43 @@ int main (int argc, char **argv) {
         std::cout << "Loaded " << configuration.in_file
                   << " (" << in_w << "x" << in_h
                   << "px per face)" << std::endl;
+
+        // size_t sz = 128; // set to 128*128 pixels
+        size_t sz = in_w;
+        constexpr int LAMBERTIAN_OUT_SIZE = 16; // writeup: having an edge length of 16 pixels is reasonable. TODO: size cannot be fixed for different mip levels
+
+        // For GGX: first mip level after the base level; lowest non-zero roughness; half the side length of the input cube
+        // number of mip levels N = floor(log2(sz)). -> 2^N = sz.
+        //      sz    1 2 4
+        // level(N)   0 1 2
+        // Mip m has out_size = sz >> m = sz / (2^m) and roughness = m / N.
+        // level(m)   0    1      2       N
+        //   out_sz   sz   sz/2   sz/4    sz/(2^N)
+        //    rough   0    1/N    2/N     1
+        // Mip 1 (lowest non-zero roughness, half res) through mip N (roughness=1, 1x1).                                                                                                          
+        int ggx_mip_count = 0;                                                                                                                                                                    
+        if (mode == CubePipeline::Mode::GGX) {                                                                                                                                                    
+            int sz_step = sz;                                                                                                                                                                           
+            while (sz_step > 1) { sz_step >>= 1; ggx_mip_count++; }                                                                                                                                           
+            if (ggx_mip_count == 0) {                                                                                                                                                             
+                stbi_image_free(in_data);                                                                                                                                                         
+                throw std::runtime_error("Input cubemap too small for GGX mip generation. Need at least 2x2 per face).");                                                                         
+            }                                                                                                                                                                                     
+            std::cout << "GGX: will generate " << ggx_mip_count << " mip levels." << std::endl;                                                                                              
+        }
+
         // create descriptors
         // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params); Prof's code only creates one in_face and one out_face.
-        VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-        { // create descriptor pool
+        VkDescriptorPool in_descriptor_pool = VK_NULL_HANDLE; // pool for input faces
+        { // create descriptor pool for input faces
             std::array< VkDescriptorPoolSize, 2> pool_sizes{
                 VkDescriptorPoolSize{
                     .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // for the WORLD_FROM_PIXEL transform buffers
-                    .descriptorCount = 6 * 2 + 1, // one for each input and output cube face, plus one for params//??A2-diffuse
+                    .descriptorCount = 6,
                 },
                 VkDescriptorPoolSize{
                     .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // for the face images
-                    .descriptorCount = 6 * 2, // one for each input and output cube face
+                    .descriptorCount = 6,
                 }
             };
 
@@ -333,12 +358,48 @@ int main (int argc, char **argv) {
                 - VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: Allows freeing individual descriptor sets with vkFreeDescriptorSets
                 - VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT: Lets you update descriptors after binding them to a command buffer (needed for bindless) */
                 .flags = 0, // never need to free individual sets, therefore use 0 instead of CREATE_FREE_DESCRIPTOR_SET_BIT, thus CANNOT free individual descriptors allocated from this pool
-                .maxSets = 12 + 1, // 13 sets: 6 in-faces + 6 out-faces + 1 params
+                .maxSets = 6,
                 .poolSizeCount = uint32_t(pool_sizes.size()),
                 .pPoolSizes = pool_sizes.data(),
             };
 
-            VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &descriptor_pool));
+            VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &in_descriptor_pool));
+        }
+
+        /* A2-pbr
+        Create pool for output faces + params. 
+        Originally in faces, out faces, and params are all in one pool. I split it to handle mip map.
+        mip loop need to reset the descriptor to reuse the same descriptor set slots for output faces for each mip level.
+        if everything were in one pool, resetting the descriptor pool will lose the input face descriptor sets.
+        Now in_descriptor_pool never resets. out_descriptor_pool resets at the start of each mip level.
+        */
+        VkDescriptorPool out_descriptor_pool = VK_NULL_HANDLE;
+        { // create descriptor pool for output faces + params
+            std::array< VkDescriptorPoolSize, 2> pool_sizes{
+                VkDescriptorPoolSize{
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // for the WORLD_FROM_PIXEL transform buffers
+                    .descriptorCount = 6 + 1, // 6 out face UBOs (WORLD_FROM_OUT_PX)+ 1 param UBO (roughness)
+                },
+                VkDescriptorPoolSize{
+                    .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // for the face images
+                    .descriptorCount = 6, // 6 storage images
+                }
+            };
+
+            VkDescriptorPoolCreateInfo create_info{
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+
+                /* three options for flags:
+                - 0: Default — sets can only be freed by resetting/destroying the whole pool
+                - VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT: Allows freeing individual descriptor sets with vkFreeDescriptorSets
+                - VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT: Lets you update descriptors after binding them to a command buffer (needed for bindless) */
+                .flags = 0, // never need to free individual sets, therefore use 0 instead of CREATE_FREE_DESCRIPTOR_SET_BIT, thus CANNOT free individual descriptors allocated from this pool
+                .maxSets = 6 + 1,
+                .poolSizeCount = uint32_t(pool_sizes.size()),
+                .pPoolSizes = pool_sizes.data(),
+            };
+
+            VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &out_descriptor_pool));
         }
 
         VkCommandPool command_pool = VK_NULL_HANDLE;
@@ -366,11 +427,12 @@ int main (int argc, char **argv) {
             VK( vkAllocateCommandBuffers(rtg.device, &alloc_info, &command_buffer));
         }
 
-        // size_t sz = 128; // set to 128*128 pixels
-        size_t sz = in_w;
-        constexpr int OUT_SIZE = 16; // writeup: having an edge length of 16 pixels is reasonable.
-
-        std::array<GPUFace, 12> faces;
+        /*
+        Originally all input and output faces were created at once during A2-diffuse
+        I split it for A2-pbr because input faces always have the same size and image data, but output faces change for every mip level
+        */
+        std::array<GPUFace, 6> in_faces; // create input faces
+        std::array<GPUFace, 6> out_faces; // create output faces
         for (int f = 0; f < 6; f++) {
             std::vector< glm::vec3 > data(sz * sz);
             
@@ -394,63 +456,79 @@ int main (int argc, char **argv) {
                 }
             }
 
-             // in_face and out_face each holds a descriptor set
-            GPUFace in_face;
-            in_face.create(rtg, descriptor_pool, cube_pipeline, sz, data.data(), f);
-            GPUFace out_face;
-            std::vector< glm::vec3 > zero(OUT_SIZE * OUT_SIZE, glm::vec3(0.0f));
-            out_face.create(rtg, descriptor_pool, cube_pipeline, OUT_SIZE, zero.data(), f);
-
-            // the in_face and out_face of faces f are at faces[f * 2] and faces[f * 2 + 1]
-            // e.g. faces 0 -> 0, 1; faces 1 -> 2, 3; faces 2 -> 4, 5; ...; faces 5 -. 10, 11
-            faces[f * 2] = std::move(in_face);
-            faces[f * 2 + 1] = std::move(out_face);
+            // in_face and out_face each holds a descriptor set
+            in_faces[f].create(rtg, in_descriptor_pool, cube_pipeline, sz, data.data(), f);
         }
-        std::cout << "Created " << faces.size() << " faces" << std::endl;
+        stbi_image_free(in_data);
+        std::cout << "Created " << in_faces.size() << " input faces" << std::endl;
 
         Helpers::AllocatedBuffer params_buffer;
         VkDescriptorSet params_descriptors = VK_NULL_HANDLE;
-        if (mode == CubePipeline::Mode::GGX) { // params buffer and descriptors
-            params_buffer = rtg.helpers.create_buffer(
-                sizeof(CubePipeline::Params),
-                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                Helpers::Unmapped
-            );
-            // CubePipeline::Params params{ .roughness = 0.5f }; // TODO: this is placeholder, should add more mip levels
-            CubePipeline::Params params{ .roughness = 0.0f };
-            // CubePipeline::Params params{ .roughness = 1.0f };
-            rtg.helpers.transfer_to_buffer(&params, sizeof(params), params_buffer);
-
-            { // descriptor set with the params uniform
-                { // allocate
-                    VkDescriptorSetAllocateInfo alloc_info{
-                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                        .descriptorPool = descriptor_pool,
-                        .descriptorSetCount = 1,
-                        .pSetLayouts = &cube_pipeline.set2_params,
-                    };
-                    VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &params_descriptors) );
-                }
-                { //write               
-                    VkDescriptorBufferInfo buffer_info{
-                        .buffer = params_buffer.handle,
-                        .offset = 0,
-                        .range = params_buffer.size,
-                    };
-                    VkWriteDescriptorSet write{
-                        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                        .descriptorCount = 1,
-                        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        .dstArrayElement = 0, // Starting array index within the binding — 0 since this isn't an array descriptor
-                        .dstBinding = 0, // corresponds to the binding = N number delcared in shader AND in the VkDescriptorSetLayoutBinding in CubePipeline.cpp
-                        .dstSet = params_descriptors, // write to this descriptor set
-                        .pBufferInfo = &buffer_info,
-                    };
-                    vkUpdateDescriptorSets(rtg.device, 1, &write, 0, nullptr);
-                }
+        // params buffer and descriptors
+            if (mode == CubePipeline::Mode::GGX) {
+                params_buffer = rtg.helpers.create_buffer(
+                    sizeof(CubePipeline::Params),
+                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    Helpers::Unmapped
+                );
             }
-        }
+
+            std::string out_base = (mode == CubePipeline::Mode::GGX) ? configuration.ggx_out_file : configuration.lambertian_out_file;
+            int loop_start = (mode == CubePipeline::Mode::GGX) ? 1 : 0;
+            int loop_end = (mode == CubePipeline::Mode::GGX) ? ggx_mip_count : 0;
+
+            for (int mip = loop_start; mip <= loop_end; mip++) {
+                // calc output size and roughness for every iteration
+                int out_size;
+                float roughness;
+                if (mode == CubePipeline::Mode::GGX) {
+                    out_size = sz >> mip;
+                    roughness = float(mip) / (float)ggx_mip_count;
+                } else {
+                    out_size = LAMBERTIAN_OUT_SIZE;
+                    roughness = 0.f;
+                }
+
+                // reset descriptor pool so that its slots can be reused for every iteration's out faces and params
+                VK( vkResetDescriptorPool(rtg.device, out_descriptor_pool, 0));
+
+                for (int f = 0; f < 6; f++) {
+                    std::vector<glm::vec3> zero(out_size * out_size, glm::vec3(0.0f));
+                    out_faces[f].create(rtg, out_descriptor_pool, cube_pipeline, out_size, zero.data(), f);
+                }
+
+                if (mode == CubePipeline::Mode::GGX) { // descriptor set with the params uniform
+                    CubePipeline::Params params{ .roughness = roughness };
+                    rtg.helpers.transfer_to_buffer(&params, sizeof(params), params_buffer);
+
+                    { // allocate
+                        VkDescriptorSetAllocateInfo alloc_info{
+                            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                            .descriptorPool = out_descriptor_pool,
+                            .descriptorSetCount = 1,
+                            .pSetLayouts = &cube_pipeline.set2_params,
+                        };
+                        VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &params_descriptors) );
+                    }
+                    { //write               
+                        VkDescriptorBufferInfo buffer_info{
+                            .buffer = params_buffer.handle,
+                            .offset = 0,
+                            .range = params_buffer.size,
+                        };
+                        VkWriteDescriptorSet write{
+                            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                            .descriptorCount = 1,
+                            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                            .dstArrayElement = 0, // Starting array index within the binding — 0 since this isn't an array descriptor
+                            .dstBinding = 0, // corresponds to the binding = N number delcared in shader AND in the VkDescriptorSetLayoutBinding in CubePipeline.cpp
+                            .dstSet = params_descriptors, // write to this descriptor set
+                            .pBufferInfo = &buffer_info,
+                        };
+                        vkUpdateDescriptorSets(rtg.device, 1, &write, 0, nullptr);
+                    }
+                }
 
         { // run pipeline
             /*
@@ -479,8 +557,8 @@ int main (int argc, char **argv) {
                         // Lambertian needs 2 sets (in_face, out_face).
                         // GGX needs 3 sets (in_face, out_face, params with roughness).
                         std::vector<VkDescriptorSet> descriptor_sets = {
-                            faces[in_f * 2].descriptors,
-                            faces[out_f * 2 + 1].descriptors,
+                            in_faces[in_f].descriptors,
+                            out_faces[out_f].descriptors,
                         };
                         if (mode == CubePipeline::Mode::GGX) {
                             descriptor_sets.push_back(params_descriptors);
@@ -511,7 +589,7 @@ int main (int argc, char **argv) {
 
                         When dispatch sz × sz workgroups, the GPU runs void main() sz × sz times *in parallel*, each time with a different gl_GlobalInvocationID. That ID is what tells each invocation which pixel it owns.
                         */
-                        vkCmdDispatchBase(command_buffer, 0, 0, 1, OUT_SIZE, OUT_SIZE, 1); // Dispatch OUT_SIZE * OUT_SIZE workgroups, IDs start at (0, 0, 1);
+                        vkCmdDispatchBase(command_buffer, 0, 0, 1, out_size, out_size, 1); // Dispatch out_size * out_size workgroups, IDs start at (0, 0, 1);
 
                         // barrier: ensure write from this dispatch is visible to next dispatch
                         // needed because shader reads accumulated values from all prev faces
@@ -548,10 +626,14 @@ int main (int argc, char **argv) {
             VK( vkDeviceWaitIdle(rtg.device) ); // blocks the CPU until all operations on all queues of the device have finished.
         }
 
-        std::cout << "Computing: done." << std::endl;
+        if (mode == CubePipeline::Mode::GGX) {
+            std::cout << "Mip " << mip << "/" << ggx_mip_count << " (roughness=" << roughness << ", size=" << out_size << "): computing done." << std::endl;
+        } else {
+            std::cout << "Computing: done." << std::endl;
+        }
 
-        // VkDeviceSize face_size = sz * sz * sizeof(glm::vec4); // bug: out_face are OUT_SIZE*OUT_SIZE; sz*sz is in_face size
-        VkDeviceSize face_size = OUT_SIZE * OUT_SIZE * sizeof(glm::vec4);
+        // VkDeviceSize face_size = sz * sz * sizeof(glm::vec4); // bug: out_face are out_size*out_size; sz*sz is in_face size
+        VkDeviceSize face_size = (VkDeviceSize)out_size * out_size * sizeof(glm::vec4);
         Helpers::AllocatedBuffer out_pixels_buffer = rtg.helpers.create_buffer(
             face_size * 6,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -569,12 +651,7 @@ int main (int argc, char **argv) {
                 VK( vkBeginCommandBuffer(command_buffer, &begin_info));
             }
 
-            int out_w = OUT_SIZE;
-            int out_h = OUT_SIZE * 6;
-
             for (int f = 0; f < 6; f++) {
-                GPUFace &out_face = faces[f * 2 + 1];
-
                 VkBufferImageCopy region{
                     .bufferOffset = f * face_size,
                     .bufferRowLength = 0, // means tightly packed
@@ -587,13 +664,13 @@ int main (int argc, char **argv) {
                     },
                     .imageOffset{.x = 0, .y = 0, .z = 0},
                     .imageExtent{
-                        .width = out_face.image.extent.width,
-                        .height = out_face.image.extent.height,
+                        .width = (uint32_t)out_size,
+                        .height = (uint32_t)out_size,
                         .depth = 1},
                 };
                 vkCmdCopyImageToBuffer(
                     command_buffer, // buffer
-                    out_face.image.handle, // src
+                    out_faces[f].image.handle, // src
                     VK_IMAGE_LAYOUT_GENERAL, 
                     out_pixels_buffer.handle, 
                     1, &region
@@ -614,50 +691,62 @@ int main (int argc, char **argv) {
 
             VK( vkDeviceWaitIdle(rtg.device) ); // blocks the CPU until all operations on all queues of the device have finished.
 
-            // out_pixels_buffer.allocation.data() was written by vkCmdCopyImageToBuffer, which copies out_face images into this buffer.
-            // it holds 6 faces × OUT_SIZE × OUT_SIZE pixels, each pixel as glm::vec4
-            glm::vec4* out_pixels_floats = reinterpret_cast<glm::vec4*>(out_pixels_buffer.allocation.data());
-            std::vector<glm::u8vec4> rgbe_out(out_w * out_h);
-            for (int i = 0; i < (int)rgbe_out.size(); i++) {
-                glm::vec4 p = out_pixels_floats[i];
-                glm::vec3 color;
-                if (mode == CubePipeline::Mode::GGX) {
-                    // rgb holds prefiltered_color = sum(Li * NdotL) across all 6 face passes.
-                    // alpha holds total_weight = sum(NdotL) across all 6 face passes.
-                    // do prefiltered_color/total_weight to normalize.
-                    color = (p.a > 0.0f) ? glm::vec3(p) / p.a : glm::vec3(0.0f);
-                } else {
-                    color = glm::vec3(p);
+            { // convert float dat to RGBE and write PNG
+                // out_pixels_buffer.allocation.data() was written by vkCmdCopyImageToBuffer, which copies out_face images into this buffer.
+                // it holds 6 faces × out_size × out_size pixels, each pixel as glm::vec4
+                glm::vec4* out_pixels_floats = reinterpret_cast<glm::vec4*>(out_pixels_buffer.allocation.data());
+                int out_w = out_size;
+                int out_h = out_size * 6;
+                std::vector<glm::u8vec4> rgbe_out(out_w * out_h);
+                for (int i = 0; i < (int)rgbe_out.size(); i++) {
+                    glm::vec4 p = out_pixels_floats[i];
+                    glm::vec3 color;
+                    if (mode == CubePipeline::Mode::GGX) {
+                        // rgb holds prefiltered_color = sum(Li * NdotL) across all 6 face passes.
+                        // alpha holds total_weight = sum(NdotL) across all 6 face passes.
+                        // do prefiltered_color/total_weight to normalize.
+                        color = (p.a > 0.0f) ? glm::vec3(p) / p.a : glm::vec3(0.0f);
+                    } else {
+                        color = glm::vec3(p);
+                    }
+                    rgbe_out[i] = float_to_rgbe(color);
                 }
-                rgbe_out[i] = float_to_rgbe(color);
+
+                std::string out_file;
+                // out_base will look like "filename.png"
+                if (mode == CubePipeline::Mode::GGX) { // need to convert to "filename.N.png"
+                    size_t dot_pos = out_base.rfind('.'); // what is .rfind()?
+                    out_file = out_base.substr(0, dot_pos) + "." + std::to_string(mip) + out_base.substr(dot_pos);
+                } else {
+                    out_file = out_base;
+                }
+
+                int write_ok = stbi_write_png(
+                    out_file.c_str(), out_w, out_h,
+                    4, // channel (RGBA)
+                    rgbe_out.data(),
+                    out_w * 4 // stride = # of bytes/row = (# of pixels/row) * (# of bytes/pixel) = out_w * 4
+                );
+                if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + out_file + "'.");
             }
-            std::string out_file = (mode == CubePipeline::Mode::GGX)
-                ? configuration.ggx_out_file
-                : configuration.lambertian_out_file;
-            int write_ok = stbi_write_png(
-                out_file.c_str(), out_w, out_h,
-                4, // channel (RGBA)
-                rgbe_out.data(),
-                out_w * 4 // stride = # of bytes/row = (# of pixels/row) * (# of bytes/pixel) = out_w * 4
-            );
-            if (!write_ok) throw std::runtime_error("stbi_write_png failed for '" + out_file + "'.");
         }
-        
-        // destroy all the things
-        for (auto &face : faces) {
-            face.destroy(rtg);
+        rtg.helpers.destroy_buffer(std::move(out_pixels_buffer));
+        for (auto &f : out_faces) f.destroy(rtg);
+        // descriptor sets for out_faces and params_descriptors were allocated from out_descriptor_pool
+        // and will be freed when the pool is reset at the start of the next iteration (or destroyed at cleanup)
         }
 
-        if (out_pixels_buffer.handle != VK_NULL_HANDLE) {
-			rtg.helpers.destroy_buffer(std::move(out_pixels_buffer));
-		}
+        // destroy all the things
+        for (auto &in_face : in_faces) in_face.destroy(rtg);
 
         if (params_buffer.handle != VK_NULL_HANDLE) {
             rtg.helpers.destroy_buffer(std::move(params_buffer));
         }
 
-        vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
-        descriptor_pool = VK_NULL_HANDLE;
+        vkDestroyDescriptorPool(rtg.device, in_descriptor_pool, nullptr);
+        vkDestroyDescriptorPool(rtg.device, out_descriptor_pool, nullptr);
+        in_descriptor_pool = VK_NULL_HANDLE;
+        out_descriptor_pool = VK_NULL_HANDLE;
 
         vkDestroyCommandPool(rtg.device, command_pool, nullptr);
         command_pool = VK_NULL_HANDLE;
