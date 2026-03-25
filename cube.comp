@@ -25,11 +25,6 @@ layout(set=2, binding=0, std140) uniform Roughness { // use std140: uniform bloc
 };
 
 // Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
-
-// Generates a GGX-distributed half-vector H in world space around normal N,
-// given a 2D uniform sample Xi and roughness.
-// α = roughness² follows the Disney/Karis squared-roughness convention.
-// Credit: Karis 2013 Listing 2, LearnOpenGL https://learnopengl.com/PBR/IBL/Specular-IBL
 vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float Roughness) {
     // Note that Epic Games uses the squared roughness for better visual results as based on Disney's original PBR research.
     float a = Roughness * Roughness;
@@ -173,6 +168,7 @@ void main() {
         }
     }
 
+    // output: prefiltered_color = what color light comes from a certain direction at a certain roughness?
     // main-cube.cpp divides rgb / alpha at readback to produce the final normalized color.
     vec4 prev = imageLoad(outFace, outCoord);
     imageStore(outFace, outCoord, vec4(prefiltered_color + prev.rgb, total_weight + prev.a));

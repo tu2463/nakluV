@@ -74,6 +74,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set6_GGXSpecularMap = VK_NULL_HANDLE; // prefiltered GGX specular mipmap
 
 		// types for descriptors:
 		struct World {
@@ -167,25 +168,36 @@ struct Tutorial : RTG::Application {
 	// ObjectVertices sphere_vertices;
 	// ObjectVertices torus_vertices;
 
-	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
-	std::vector< Helpers::AllocatedImage > normal_maps; // holds actual image data
-
-	std::vector< VkImageView > texture_views;
-	std::vector< VkImageView > normal_map_views;
-	VkImageView cubemap_view = VK_NULL_HANDLE;
-	VkImageView lambertian_cubemap_view = VK_NULL_HANDLE; // A2-diffuse
 
 	VkSampler texture_sampler = VK_NULL_HANDLE; // gives the sampler state (wrapping, interpolation, etc)
+	std::vector< Helpers::AllocatedImage > textures; // holds actual image data
+	std::vector< VkImageView > texture_views;
 	VkDescriptorPool texture_descriptor_pool = VK_NULL_HANDLE; // from which we allocate texture descriptor sets
-
 	std::vector< VkDescriptorSet > texture_descriptors; // allocated from texture_descriptor_pool; includes a descriptor for each of our textures.
-	std::vector< VkDescriptorSet>  normal_map_descriptors;
-	VkDescriptorSet cubemap_descriptors = VK_NULL_HANDLE; // allocated from texture_descriptor_pool; include a descriptor for the cube map
-	VkDescriptorSet lambertian_cubemap_descriptors = VK_NULL_HANDLE;
-
 	std::unordered_map< S72::Texture*, uint32_t > texture_index_map; // maps S72 texture pointers to texture indices
 	std::unordered_map< S72::Material*, uint32_t > material_albedo_map; // maps materials to their albedo texture index
+
+	VkImageView cubemap_view = VK_NULL_HANDLE; // A2-diffuse
+	VkDescriptorSet cubemap_descriptors = VK_NULL_HANDLE; // allocated from texture_descriptor_pool; include a descriptor for the cube map
+
+	VkImageView lambertian_cubemap_view = VK_NULL_HANDLE; // A2-diffuse
+	VkDescriptorSet lambertian_cubemap_descriptors = VK_NULL_HANDLE;
+
+	std::vector< Helpers::AllocatedImage > normal_maps; // holds actual image data
+	std::vector< VkImageView > normal_map_views; // A2-normal
+	std::vector< VkDescriptorSet>  normal_map_descriptors;
 	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
+
+	// A2-pbr: GGX (one cubemap imag with multiple mip levels)
+	Helpers::AllocatedImage ggx_image;
+	/* we need a separate sampler for GGX because:
+	- maxLod must be set to the number of mip levels (e.g. 5.0) — otherwise textureLod() can't access the roughness mip levels. A sampler configured for a regular texture might clamp maxLod too low.
+	- minFilter = LINEAR + mipmapMode = LINEAR for smooth interpolation between mip levels (between roughness values).
+	- addressMode needs to be appropriate for a cubemap (typically CLAMP_TO_EDGE to avoid seams at cube edges).
+	*/
+	VkSampler ggx_sampler;
+	VkImageView ggx_view = VK_NULL_HANDLE;
+	VkDescriptorSet ggx_descriptors = VK_NULL_HANDLE; // will be allocated from texture_descriptor_pool
 
 	/* A2-env
 	You must use a pixel format for environment images which can support high dynamic range.
@@ -311,6 +323,11 @@ struct Tutorial : RTG::Application {
 	std::vector< ObjectInstance > object_instances;
 
 	std::vector< S72::Mesh > s72_meshes;
+
+	struct MipData {
+		std::vector<float> floats;
+		int face_width, face_height;
+	} mip_data;
 
 	//--------------------------------------------------------------------
 	//Rendering function, uses all the resources above to queue work to draw a frame:

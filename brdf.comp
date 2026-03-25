@@ -1,0 +1,124 @@
+//Credit: https://learnopengl.com/Guest-Articles/2022/Compute-Shaders/Introduction
+
+/*
+The second part of the split sum equation equals the BRDF part of the specular integral. 
+If we pretend the incoming radiance is completely white for every direction (thus L(p,x)=1.0), 
+we can pre-calculate the BRDF's response given an input roughness and an input angle between the normal n and light direction ωi, or n⋅ωi. 
+
+Epic Games stores the pre-computed BRDF's response to each normal and light direction combination on varying roughness values in a 2D lookup texture (LUT) known as the BRDF integration map. 
+The 2D lookup texture outputs a scale and a bias value to the surface's Fresnel response giving us the second part of the split specular integral.
+*/
+
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
+layout(set=0, binding=0, rg32f) brdfLUT; // lookup table. use rg32f because only two outputs (scale and bias)
+
+// Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+float GeometrySchlickGGX(float NdotV, float roughness) {
+    float a = roughness;
+    float k = (a * a) / 2.0;
+
+    float nom   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}  
+
+// Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float Roughness) {
+    // Note that Epic Games uses the squared roughness for better visual results as based on Disney's original PBR research.
+    float a = Roughness * Roughness;
+
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+
+    // from spherical coordinates to cartesian coordinates (tangent space)
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    // from tangent-space vector to world-space sample vector
+    vec3 up        = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+
+// Credit: https://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+// Generates a quasi-random low-discrepancy value in [0,1) by bit-reversing i.
+float RadicalInverse_VdC(uint bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+// Returns the i-th point in the Hammersley 2D low-discrepancy sequence over N total samples.
+vec2 Hammersley(uint i, uint N) {
+    return vec2(float(i)/float(N), RadicalInverse_VdC(i));
+}
+
+vec2 IntegrateBRDF(float NdotV, float roughness) {
+    vec3 V;
+    V.x = sqrt(1.0 - NdotV*NdotV);
+    V.y = 0.0;
+    V.z = NdotV;
+
+    float A = 0.0;
+    float B = 0.0;
+
+    vec3 N = vec3(0.0, 0.0, 1.0);
+
+    const uint SAMPLE_COUNT = 1024u;
+    for(uint i = 0u; i < SAMPLE_COUNT; ++i)
+    {
+        vec2 Xi = Hammersley(i, SAMPLE_COUNT);
+        vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = max(L.z, 0.0);
+        float NdotH = max(H.z, 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+
+        if(NdotL > 0.0)
+        {
+            float G = GeometrySmith(N, V, L, roughness);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc = pow(1.0 - VdotH, 5.0);
+
+            A += (1.0 - Fc) * G_Vis;
+            B += Fc * G_Vis;
+        }
+    }
+    A /= float(SAMPLE_COUNT);
+    B /= float(SAMPLE_COUNT);
+    return vec2(A, B);
+}
+
+int main() {
+    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy); // the output pixel this code is responsible for
+    ivec2 size = imageSize(brdfLUT);
+    if (outCoord.x >= size.x || outCoord.y >= size.y) return; // Valid pixel coordinates are 0 to size.x - 1
+
+    float NdotV = (float(outCoord.x) + 0.5) / float(size.x); // N=surface normal, V=view direction (dir towards the camera)
+    float roughness = (float(outCoord.y) + 0.5) / float(size.y);
+    // output: how much specular response given NdotV and roughness
+    vec2 integratedBRDF = IntegrateBRDF(NdotV, roughness); // two outputs (1. scale, 2. bias to F0)
+    
+    imageStore(brdfLUT, outCoord, vec4(integratedBRDF, 0.0, 1.0));
+}

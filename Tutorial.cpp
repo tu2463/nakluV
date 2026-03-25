@@ -3,6 +3,9 @@
 #include "VK.hpp"
 // #include "refsol.hpp"
 
+#include "RGBE.hpp"
+#include "stb_image.h"
+
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -780,6 +783,20 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			writes.data(), // descriptorWrites	
 			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
 		);
+	}
+
+	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
+		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
+			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
+			std::string ggx_base = s72.env_radiance_texture->path.substr(0, dot_pos) + ".ggx.png"; // find the X.ggx.png data
+
+			// load mip pngs e.g. X.ggx.N.png until couldn't find one anymore
+			for (int mip = 1; mip++) {
+				size_t dot2_pos = s72.env_radiance_texture->path.rfind('.');
+				std::string ggx_file = s72.env_radiance_texture->path.substr(0, dot2_pos) + std::to_string(mip) + ".png";
+				break;
+			}
+		}
 	}
 
 	{ // allocate and write the normal map descriptor set
