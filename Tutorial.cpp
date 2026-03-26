@@ -16,6 +16,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 
 #include <random>
@@ -658,14 +659,14 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		std::array< VkDescriptorPoolSize, 1 > pool_sizes{ // tells Vulkan how much memory to reserve in the pool, categorized by type
 			VkDescriptorPoolSize{ // total number of individual descriptors available, categorized by type 
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.descriptorCount = per_texture + 2 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map
+				.descriptorCount = per_texture + 4 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map + 1 ggx + 1 brdf lut
 			},
 		};
 
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = per_texture + 2 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map
+			.maxSets = per_texture + 4 + per_normal_map, // 1 per texture + 1 radiance cubemap + 1 lambertian cubemap + 1 per normal map + 1 ggx + 1 brdf lut
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(), // total number of individual descriptors available, categorized by type   
 		};
@@ -788,14 +789,231 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
 		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
 			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
-			std::string ggx_base = s72.env_radiance_texture->path.substr(0, dot_pos) + ".ggx.png"; // find the X.ggx.png data
+			std::vector<ObjectsPipeline::MipData> mip_data;
 
-			// load mip pngs e.g. X.ggx.N.png until couldn't find one anymore
-			for (int mip = 1; mip++) {
-				size_t dot2_pos = s72.env_radiance_texture->path.rfind('.');
-				std::string ggx_file = s72.env_radiance_texture->path.substr(0, dot2_pos) + std::to_string(mip) + ".png";
-				break;
+			// load mip pngs e.g. X.ggx.N.png until file not found
+			for (int mip = 1; ; mip++) {
+				std::string ggx_file = s72.env_radiance_texture->path.substr(0, dot_pos) + ".ggx." + std::to_string(mip) + ".png";
+
+				int ggx_w, ggx_h, ggx_channels;
+				unsigned char* data = stbi_load(ggx_file.c_str(), &ggx_w, &ggx_h, &ggx_channels, 4);
+				if (!data) {
+					std::cout << "GGX mip " << mip << "not found at " << ggx_file << ". Stopping at mip=" << (mip - 1) << std::endl;
+					break;
+				}
+
+				ObjectsPipeline::MipData cur_mip_data;
+				int face_h = ggx_h / 6;
+				cur_mip_data.face_width = ggx_w;
+				cur_mip_data.face_height = face_h;
+				cur_mip_data.floats.resize(ggx_w * ggx_h * 4); // 4 channels
+				for (int i = 0; i < ggx_w * ggx_h; i++) {
+					glm::vec3 rgb = rgbe_to_float(glm::u8vec4(data[i*4], data[i*4+1], data[i*4+2], data[i*4+3]));
+					cur_mip_data.floats[i*4+0] = rgb.r;
+					cur_mip_data.floats[i*4+1] = rgb.g;
+					cur_mip_data.floats[i*4+2] = rgb.b;
+					cur_mip_data.floats[i*4+3] = 1.0f;
+				}
+
+				stbi_image_free(data);
+				mip_data.push_back(cur_mip_data);
+				constexpr int MAX_REFLECTION_LOD = 4; // I define it to be 4 in frag shader
+				std::cout << "Loaded GGX mip=" << mip << ": " << ggx_w << "x" << face_h << ", roughness=" << (float(mip - 1) / MAX_REFLECTION_LOD) << std::endl;
 			}
+
+			ggx_mip_count = static_cast<uint32_t>(mip_data.size());
+
+			if (ggx_mip_count > 0) {
+				uint32_t face_w = mip_data[0].face_width;
+				uint32_t face_h = mip_data[0].face_height;
+
+				ggx_image = rtg.helpers.create_image(
+					VkExtent2D{.width = face_w, .height = face_h},
+					cubemap_format,
+					VK_IMAGE_TILING_OPTIMAL,
+					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+					Helpers::Unmapped,
+					VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+					6,
+					ggx_mip_count
+				);
+				// upload each mip level's 6 faces via transfer_to_image_mip
+				for (uint32_t mip = 0; mip < ggx_mip_count; mip++) {
+					ObjectsPipeline::MipData const &cur_mip_data = mip_data[mip];
+					rtg.helpers.transfer_to_image_mip(
+						cur_mip_data.floats.data(),
+						cur_mip_data.floats.size() * sizeof(float),
+						ggx_image,
+						mip,
+						6
+					);
+				}
+
+				{ // create cubemap image view for all mip levels
+					VkImageViewCreateInfo create_info{
+						.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+						.flags = 0,
+						.image = ggx_image.handle, // The underlying VkImage handle this view refers to.
+						.viewType = VK_IMAGE_VIEW_TYPE_CUBE,
+						.format = ggx_image.format, // Use the same format the image was created with (e.g., VK_FORMAT_R8G8B8A8_SRGB).
+						// .components sets swizzling and is fine when zero-initialied; Left zero-initialized, which means no channel swizzling — R maps to R, G to G, etc. (identity mapping).
+						.subresourceRange{ // Specifies which part of the image to view:
+							.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // this is a color image (not depth/stencil).
+							.baseMipLevel = 0, .levelCount = ggx_mip_count,
+							.baseArrayLayer = 0, .layerCount = 6u, // 6 layers for cubemap
+						},
+					};
+					VK( vkCreateImageView(rtg.device, &create_info, nullptr, &ggx_view) );
+				}
+
+				{ // create sampler for ggx
+					// explain why create info was set up like this //?? how is it differ from the texture sampler? and why different?
+					VkSamplerCreateInfo create_info {
+						.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+						.flags = 0,
+						.magFilter = VK_FILTER_LINEAR, // Use linear filtering for magnification (smoother)
+						.minFilter = VK_FILTER_LINEAR, // Use linear filtering for minification (smoother)
+						.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR, // ggx needs smooth interpolation, filter_linear results in smoother interp compared to filter_nearest
+						.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, // should not repeat. //??-A2-pbr
+						.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+						.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+						.mipLodBias = 0.0f, // No bias applied when selecting mipmap levels.
+						.anisotropyEnable = VK_FALSE, // Anisotropic filtering is disabled. This means maxAnisotropy is ignored.
+						.maxAnisotropy = VK_FALSE, // doesn't matter if anisotropy isn't enabled
+						.compareEnable = VK_FALSE, // Depth comparison is disabled (used for shadow mapping). So compareOp is ignored.
+						.compareOp = VK_COMPARE_OP_ALWAYS, // doesn't matter if compare isn't enabled
+						.minLod = 0.0f,
+						.maxLod = VK_LOD_CLAMP_NONE,
+						.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+						.unnormalizedCoordinates = VK_FALSE, // Texture coordinates are in the standard [0, 1] range rather than pixel coordinates.
+					};
+					VK( vkCreateSampler(rtg.device, &create_info, nullptr, &ggx_sampler) );
+				}
+
+				{ // allocate and write the ggx descriptor sets
+					VkDescriptorSetAllocateInfo alloc_info {
+						.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+						.descriptorPool = texture_descriptor_pool,
+						.descriptorSetCount = 1,
+						.pSetLayouts = &objects_pipeline.set6_GGXSpecularMap,
+					};
+					VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &ggx_descriptors) );
+
+					// write descriptors for ggx:
+					VkDescriptorImageInfo image_info{
+						.sampler = ggx_sampler, // use ggx sampler (mip interpolation, clamp-to-edge)
+						.imageView = ggx_view, // which texture image to sample from
+						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
+					};
+
+					// describe the write operation:
+					std::array<VkWriteDescriptorSet, 1> writes{
+						VkWriteDescriptorSet{
+							.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+							.dstSet = ggx_descriptors, // which descriptor set to update      
+							.dstBinding = 0, // binding index within that set (matches layout)
+							.dstArrayElement = 0, // starting array index (for arrayed bindings) 
+							.descriptorCount = 1, // updating 1 descriptor  
+							.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set3_CubeMap) 
+							.pImageInfo = &image_info,
+						},
+					};
+
+					vkUpdateDescriptorSets(
+						rtg.device,
+						uint32_t(writes.size()), // descriptorWrites count
+						writes.data(), // descriptorWrites	
+						0, nullptr // descriptorCopies count, data; specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
+					);
+				}
+
+				std::cout << "Loaded GGX specular mip chain: " << ggx_mip_count << " levels, base " << face_w << "x" << face_h << std::endl;
+			}
+		}
+	}
+
+	{ // A2-pbr-TODO: load BRDF split-sum LUT (precomputed by brdf.comp) and bind as set=7. brdf_lut.bin
+		// Format: raw RG32F binary, 512x512 pixels (NdotV, roughness)
+		constexpr uint32_t BRDF_LUT_SIZE = 512;
+		constexpr char BRDF_LUT_PATH[] = "brdf_lut.bin";
+
+		std::vector<float> brdf_pixels(BRDF_LUT_SIZE * BRDF_LUT_SIZE * 2, 0.0f);
+		{
+			std::ifstream fin(BRDF_LUT_PATH, std::ios::binary);
+			if (fin.good()) {
+				fin.read(reinterpret_cast<char *>(brdf_pixels.data()), brdf_pixels.size() * sizeof(float));
+				std::cout << "Loaded BRDF LUT from " << BRDF_LUT_PATH << std::endl;
+			} else {
+				std::cerr << "Warning: " << BRDF_LUT_PATH << " not found. PBR specular will be incorrect. Run the brdf utility to generate it." << std::endl;
+			}
+		}
+
+		brdf_lut_image = rtg.helpers.create_image(
+			VkExtent2D{.width = BRDF_LUT_SIZE, .height = BRDF_LUT_SIZE},
+			VK_FORMAT_R32G32_SFLOAT,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+		rtg.helpers.transfer_to_image(brdf_pixels.data(), brdf_pixels.size() * sizeof(float), brdf_lut_image);
+
+		{ // image view
+			VkImageViewCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.image = brdf_lut_image.handle,
+				.viewType = VK_IMAGE_VIEW_TYPE_2D,
+				.format = VK_FORMAT_R32G32_SFLOAT,
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0, .levelCount = 1,
+					.baseArrayLayer = 0, .layerCount = 1,
+				},
+			};
+			VK( vkCreateImageView(rtg.device, &create_info, nullptr, &brdf_lut_view) );
+		}
+
+		{ // sampler: clamp to edge, no mipmaps (UV range [0,1] encodes NdotV and roughness)
+			VkSamplerCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+				.magFilter = VK_FILTER_LINEAR,
+				.minFilter = VK_FILTER_LINEAR,
+				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+				.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.minLod = 0.0f,
+				.maxLod = 0.0f,
+			};
+			VK( vkCreateSampler(rtg.device, &create_info, nullptr, &brdf_lut_sampler) );
+		}
+
+		{ // allocate and write descriptor set
+			VkDescriptorSetAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = texture_descriptor_pool,
+				.descriptorSetCount = 1,
+				.pSetLayouts = &objects_pipeline.set7_BRDFLookup,
+			};
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &brdf_lut_descriptors) );
+
+			VkDescriptorImageInfo image_info{
+				.sampler = brdf_lut_sampler,
+				.imageView = brdf_lut_view,
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			};
+			std::array<VkWriteDescriptorSet, 1> writes{
+				VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = brdf_lut_descriptors,
+					.dstBinding = 0,
+					.dstArrayElement = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.pImageInfo = &image_info,
+				},
+			};
+			vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
 
@@ -856,6 +1074,8 @@ Tutorial::~Tutorial() {
 		// this also frees the descriptor sets allocated from the pool:
 		texture_descriptors.clear();
 		normal_map_descriptors.clear();
+		ggx_descriptors = VK_NULL_HANDLE;
+		brdf_lut_descriptors = VK_NULL_HANDLE;
 	}
 
 	if (texture_sampler) {
@@ -872,8 +1092,8 @@ Tutorial::~Tutorial() {
 	for (VkImageView &view : normal_map_views) {
       vkDestroyImageView(rtg.device, view, nullptr);
       view = VK_NULL_HANDLE;
-  }
-  normal_map_views.clear();
+  	}
+  	normal_map_views.clear();
 
 	if (cubemap_view != VK_NULL_HANDLE) {
 		vkDestroyImageView(rtg.device, cubemap_view, nullptr);
@@ -885,15 +1105,39 @@ Tutorial::~Tutorial() {
 		lambertian_cubemap_view = VK_NULL_HANDLE;
 	}
 
+	if (ggx_sampler) {
+		vkDestroySampler(rtg.device, ggx_sampler, nullptr);
+		ggx_sampler = VK_NULL_HANDLE;
+	}
+
+	if (ggx_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, ggx_view, nullptr);
+		ggx_view = VK_NULL_HANDLE;
+	}
+
+    rtg.helpers.destroy_image(std::move(ggx_image));
+
+	if (brdf_lut_sampler) {
+		vkDestroySampler(rtg.device, brdf_lut_sampler, nullptr);
+		brdf_lut_sampler = VK_NULL_HANDLE;
+	}
+
+	if (brdf_lut_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, brdf_lut_view, nullptr);
+		brdf_lut_view = VK_NULL_HANDLE;
+	}
+
+	rtg.helpers.destroy_image(std::move(brdf_lut_image));
+
 	for (auto &texture : textures) {
 		rtg.helpers.destroy_image(std::move(texture));
 	}
 	textures.clear();
 
-	  for (auto &image : normal_maps) {
+	for (auto &image : normal_maps) {
       rtg.helpers.destroy_image(std::move(image));
-  }
-  normal_maps.clear();
+  	}
+  	normal_maps.clear();
 
 	rtg.helpers.destroy_buffer(std::move(object_vertices)); // why don't we need to check whether it != NULL before destroying it, like the other checks //vv the type is AllocatedBuffer, is a struct that wraps the handle; the destroy_buffer function can take care of checking whether the handle is null
 
@@ -1537,6 +1781,32 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				0, nullptr // dynamic offsets count, ptr
 			);
 		}
+
+		{ // bind ggx mip map at set=6
+			VkDescriptorSet final_ggx_descriptors = (ggx_descriptors != VK_NULL_HANDLE)
+												  ? ggx_descriptors
+												  : cubemap_descriptors;
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				objects_pipeline.layout,
+				6, // set=6: ggx prefiltered mip map
+				1, &final_ggx_descriptors,
+				0, nullptr // dynamic offsets count, ptr
+			);
+		}
+
+		if (brdf_lut_descriptors != VK_NULL_HANDLE) {
+			vkCmdBindDescriptorSets(
+				workspace.command_buffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				objects_pipeline.layout,
+				7, // set=7: BRDF split-sum LUT
+				1, &brdf_lut_descriptors,
+				0, nullptr
+			);
+		}
+
 		// draw all instances:
 		for (ObjectInstance const &inst : object_instances) {
 			{ // push material_type:
@@ -1544,6 +1814,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 					.material_type = inst.material_type,
 					.exposure = rtg.configuration.exposure,
 					.tone_map_push = objects_pipeline.tone_map,
+					.roughness = inst.roughness,
+					.metalness = inst.metalness,
 				};
 				vkCmdPushConstants(workspace.command_buffer, objects_pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
 			}
@@ -1951,8 +2223,12 @@ void Tutorial::update(float dt) {
 				}
 
 				ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
-				if (std::holds_alternative<S72::Material::PBR>(node->mesh->material->brdf)) { // checks if a std::variant currently holds a specific alternative type
+				float inst_roughness = 0.5f, inst_metalness = 0.0f;;
+				if (std::holds_alternative<S72::Material::PBR>(node->mesh->material->brdf)) { // returns true/false checks if a std::variant currently holds a specific alternative type
 					material_type = ObjectsPipeline::MaterialType::PBR;
+					auto const &pbr = std::get<S72::Material::PBR>(node->mesh->material->brdf); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
+					if (auto *roughness = std::get_if<float>(&pbr.roughness)) inst_roughness = *roughness;
+					if (auto *metalness = std::get_if<float>(&pbr.metalness)) inst_metalness = *metalness;
 				} else if (std::holds_alternative<S72::Material::Lambertian>(node->mesh->material->brdf)) {
 					material_type = ObjectsPipeline::MaterialType::Lambertian;
 				} else if (std::holds_alternative<S72::Material::Mirror>(node->mesh->material->brdf)) {
@@ -1966,6 +2242,8 @@ void Tutorial::update(float dt) {
 					.transform = tf,
 					.texture = tex_index,
 					.material_type = material_type,
+					.roughness = inst_roughness,
+					.metalness = inst_metalness,
 				});
 			}
 

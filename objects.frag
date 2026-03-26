@@ -80,7 +80,8 @@ void main() {
         vec3 R = reflect(-V, N); // reflection direction
         float NdotV = max(dot(n, V), 0.0);
 
-        const float MAX_REFLECTION_LOD = 4.0; // In the pre-filter step we only convoluted the environment map up to a maximum of 5 mip levels (0 to 4), which we denote here as MAX_REFLECTION_LOD to ensure we don't sample a mip level where there's no (relevant) data.
+        // highest mip level index 
+        const float MAX_REFLECTION_LOD = 4.0; // A2-pbr-TODO: The LearnOpenGL tutorial creates and loads 4 mipmaps at most. maybe we don't need this constraint. In the pre-filter step we only convoluted the environment map up to a maximum of 5 mip levels (0 to 4), which we denote here as MAX_REFLECTION_LOD to ensure we don't sample a mip level where there's no (relevant) data.
         vec3 prefilteredColor = textureLod(ggxSpecularMap, R,  roughness * MAX_REFLECTION_LOD).rgb;  // sample the appropriate mip level based on the surface roughness, giving rougher surfaces blurrier specular reflections
 
         // mix(): linearly interpolate between two values

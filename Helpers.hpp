@@ -61,7 +61,7 @@ struct Helpers {
 
 		//NOTE: could define default constructor, move constructor, move assignment, destructor for a bit more paranoia
 	};
-	AllocatedImage create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map = Unmapped, VkImageCreateFlags flags = 0, uint32_t arrayLayers = 1);
+	AllocatedImage create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map = Unmapped, VkImageCreateFlags flags = 0, uint32_t arrayLayers = 1, uint32_t mipLevels = 1);
 	void destroy_image(AllocatedImage &&allocated_image);
 	
 
@@ -73,6 +73,8 @@ struct Helpers {
 	// NOTE: in tutorial, image layout after call is VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	// added a VkImageLayout parameter in A2-diffuse to set layout after call to be VK_IMAGE_LAYOUT_GENERAL for storage images
 	void transfer_to_image(void const *data, size_t size, AllocatedImage &image, uint32_t layerCount = 1, VkImageLayout final_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	// Upload data for a single mip level (mip_level >= 0) of a multi-mip image; extent of that level is computed from image.extent >> mip_level
+	void transfer_to_image_mip(void const *data, size_t size, AllocatedImage &image, uint32_t mip_level, uint32_t layer_count = 1);
 
 	VkCommandPool transfer_command_pool = VK_NULL_HANDLE;
 	VkCommandBuffer transfer_command_buffer = VK_NULL_HANDLE;

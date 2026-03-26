@@ -75,6 +75,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set6_GGXSpecularMap = VK_NULL_HANDLE; // prefiltered GGX specular mipmap
+		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
 
 		// types for descriptors:
 		struct World {
@@ -105,12 +106,18 @@ struct Tutorial : RTG::Application {
 			ACES = 1,
 		};
 
+		struct MipData {
+			std::vector<float> floats;
+			int face_width, face_height;
+		};
+
 		// push constants
-		struct Push
-		{
+		struct Push {
 			MaterialType material_type = MaterialType::Lambertian;
 			int exposure = 0;
 			ToneMap tone_map_push = ToneMap::Linear;
+			float roughness = 0.5f; // A2-pbr
+			float metalness = 0.0f;
 		};
 		ToneMap tone_map = ToneMap::Linear;
 
@@ -188,6 +195,12 @@ struct Tutorial : RTG::Application {
 	std::vector< VkDescriptorSet>  normal_map_descriptors;
 	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
 
+	// A2-pbr: BRDF split-sum LUT (precomputed 2D texture, stored as brdf_lut.bin)
+	Helpers::AllocatedImage brdf_lut_image;
+	VkImageView brdf_lut_view = VK_NULL_HANDLE;
+	VkSampler brdf_lut_sampler = VK_NULL_HANDLE;
+	VkDescriptorSet brdf_lut_descriptors = VK_NULL_HANDLE;
+
 	// A2-pbr: GGX (one cubemap imag with multiple mip levels)
 	Helpers::AllocatedImage ggx_image;
 	/* we need a separate sampler for GGX because:
@@ -198,7 +211,8 @@ struct Tutorial : RTG::Application {
 	VkSampler ggx_sampler;
 	VkImageView ggx_view = VK_NULL_HANDLE;
 	VkDescriptorSet ggx_descriptors = VK_NULL_HANDLE; // will be allocated from texture_descriptor_pool
-
+	uint32_t ggx_mip_count = 0;
+	
 	/* A2-env
 	You must use a pixel format for environment images which can support high dynamic range.
 	An easy, but wasteful, way to do this is by decoding the images, on-CPU, to VK_FORMAT_R32G32B32A32_SFLOAT (yes, the alpha channel is needed to guarantee GPU support, acc'd to the required format support table).
@@ -318,16 +332,13 @@ struct Tutorial : RTG::Application {
 		ObjectsPipeline::Transform transform;
 		uint32_t texture = 0;
 		ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
+		float roughness = 0.5f; // A2-pbr
+		float metalness = 0.0f;
 	};
 	
 	std::vector< ObjectInstance > object_instances;
 
 	std::vector< S72::Mesh > s72_meshes;
-
-	struct MipData {
-		std::vector<float> floats;
-		int face_width, face_height;
-	} mip_data;
 
 	//--------------------------------------------------------------------
 	//Rendering function, uses all the resources above to queue work to draw a frame:
