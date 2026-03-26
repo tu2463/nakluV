@@ -34,8 +34,12 @@ common_objs = [
 	maek.CPP('Helpers.cpp'),
 ];
 
+const brdf_shaders = [
+	maek.GLSLC('brdf.comp'),
+];
+
 const main_objs = [
-	maek.CPP('Tutorial.cpp'),
+	maek.CPP('Tutorial.cpp', undefined, { depends:[...brdf_shaders] }),
 	maek.CPP('PosColVertex.cpp'),
 	maek.CPP('PosNorTexVertex.cpp'),
 	maek.CPP('PosNorTexTanVertex.cpp'),

@@ -228,21 +228,24 @@ void Helpers::transfer_to_buffer(void const *data, size_t size, AllocatedBuffer 
 	destroy_buffer(std::move(transfer_src)); // what does std::move do //??
 }
 
-void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount, VkImageLayout final_layout) {
+void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount, VkImageLayout final_layout, uint32_t mip_level) {
 	// refsol::Helpers_transfer_to_image(rtg, data, size, &target);
 
-	assert(target.handle != VK_NULL_HANDLE); // target imgage should be allocated already
+	assert(target.handle != VK_NULL_HANDLE);
 
-	// check data is the right size [new]
-	size_t bytes_per_block = vkuFormatTexelBlockSize(target.format);
+	// compute the extent of the requested mip level (mip 0 = full resolution)
+	uint32_t mip_w = std::max(1u, target.extent.width  >> mip_level);
+	uint32_t mip_h = std::max(1u, target.extent.height >> mip_level);
+
+	size_t bytes_per_block  = vkuFormatTexelBlockSize(target.format);
 	size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
-	assert(size == target.extent.width * target.extent.height * layerCount * bytes_per_block / texels_per_block);
+	assert(size == mip_w * mip_h * layerCount * bytes_per_block / texels_per_block);
 
-	// create a host-coherent source buffer
+	// create a host-coherent (CPU visible) source buffer
 	AllocatedBuffer transfer_src = create_buffer(
 		size,
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // This buffer will be the source of a copy operatio
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // he CPU can see this memory | CPU writes are automatically visible to GPU
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,// This buffer will be the source of a copy operation
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // The CPU can see this memory | CPU writes are automatically visible to GPU
 		Mapped
 	);
 
@@ -252,23 +255,21 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 
 	// begin recording a command buffer
 	VK( vkResetCommandBuffer(transfer_command_buffer, 0) );
-
 	VkCommandBufferBeginInfo begin_info{
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, // will record again every submit
 	};
-
 	VK( vkBeginCommandBuffer(transfer_command_buffer, &begin_info) );
 
-	VkImageSubresourceRange whole_image{
-		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,// Color data (not depth/stencil) 
-		.baseMipLevel = 0, // Start at mip 0 (full resolution)     
-		.levelCount = 1, // Only 1 mip level                                       
-		.baseArrayLayer = 0, // Start at layer 0   
-		.layerCount = layerCount, // 1 layer initially; 6 layers for cube maps
+	VkImageSubresourceRange mip_range{
+		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		.baseMipLevel = mip_level, // targets the requested mip level (0 = full resolution)
+		.levelCount = 1,
+		.baseArrayLayer = 0,
+		.layerCount = layerCount,
 	};
 
-	{ // put the receiving image in destination-optimal layout [new]
+	{ // UNDEFINED -> TRANSFER_DST_OPTIMAL
 		// To tell the GPU to put the image in a specific layout, we use a pipeline barrier command with a VkImageMemoryBarrier structure. 
 		// This is a synchronization primitive that requires that every command before the barrier (in a certain pipeline stage, doing a certain memory operation) 
 		// must happen before the layout transition, 
@@ -281,8 +282,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		//                       ▼ barrier                                                                                                                                                     
 		//   [Image: TRANSFER_DST_OPTIMAL layout, ready for vkCmdCopyBufferToImage]                                                                                                            
 		//                       │                                                                                                                                                             
-		//                       ▼ (next step: copy data into image)   
-
+		//                       ▼ (next step: copy data into image) 
 		VkImageMemoryBarrier barrier{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 			.srcAccessMask = 0, // doesn't place any conditions on earlier command; No prior access to wait for； Nothing was accessing this image before
@@ -292,9 +292,9 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,  //  Not transferring ownership between queues
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = target.handle, // The image to transition 
-			.subresourceRange = whole_image, // Affect the whole image 
+			.subresourceRange = mip_range,
 		};
-
+		
 		vkCmdPipelineBarrier(
 			transfer_command_buffer, // commandBuffer
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // srcStageMask: after nothing (start of pipeline) 
@@ -306,46 +306,37 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		);
 	}
 
-	{ // copy the source buffer to the image
-		// describe what part of the image to copy;
-		// parameters indicate buffer and image to copy between and the current format of the image:
-		for (uint32_t base_array_layer_i = 0; base_array_layer_i < layerCount; base_array_layer_i++) {
-			VkBufferImageCopy region{
+	// copy buffer -> image (one region per array layer)
+	// describe what part of the image to copy;
+	// parameters indicate buffer and image to copy between and the current format of the image:
+	for (uint32_t base_array_layer_i = 0; base_array_layer_i < layerCount; base_array_layer_i++) {
+		VkBufferImageCopy region{
 				/* bufferOffset = the offset in bytes from the start of the buffer object where the image data is copied from or to
 					for cube maps with 6 faces: bufferOffset = i * face_size_in_bytes      
 					the size param of this fn = total size of all the data being uploaded                                                                                                                                                       
   					face_size_in_bytes = face_width * face_height * bytes_per_pixel = size / 6
 				*/
-				.bufferOffset = base_array_layer_i * (size / layerCount),
-				.bufferRowLength = target.extent.width,
-				.bufferImageHeight = target.extent.height,
-				.imageSubresource{ // Frustratingly, the imageSubresource field of VkBufferImageCopy is a VkImageSubresourceLayers not a VkImageSubresourceRange, otherwise we could have used our convenient whole_image structure from above.
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.mipLevel = 0,
-					.baseArrayLayer = base_array_layer_i,
-					.layerCount = 1,
-				},
-				.imageOffset{ .x = 0, .y = 0, .z = 0 },
-				.imageExtent{
-					.width = target.extent.width,
-					.height = target.extent.height,
-					.depth = 1
-				},
-			};
-
-			vkCmdCopyBufferToImage(
-				transfer_command_buffer,
-				transfer_src.handle,
-				target.handle,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				1, &region // region count, region ptr
-			);
-			// NOTE: if image had mip levels, would need to copy as additional regions here
-			// Note @ A2-env: I'm copying additional regions for each of the 6 layers for cube maps
-		}
+			.bufferOffset = base_array_layer_i * (size / layerCount),
+			.bufferRowLength   = mip_w,
+			.bufferImageHeight = mip_h,
+			.imageSubresource{ // Frustratingly, the imageSubresource field of VkBufferImageCopy is a VkImageSubresourceLayers not a VkImageSubresourceRange, otherwise we could have used our convenient whole_image structure from above.
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.mipLevel = mip_level,
+				.baseArrayLayer = base_array_layer_i,
+				.layerCount = 1,
+			},
+			.imageOffset{ .x = 0, .y = 0, .z = 0 },
+			.imageExtent = { mip_w, mip_h, 1 },
+		};
+		vkCmdCopyBufferToImage(transfer_command_buffer,
+			transfer_src.handle, target.handle,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+			1, &region); // region count, region ptr
+		// NOTE: if image had mip levels, would need to copy as additional regions here
+		// Note @ A2-env: I'm copying additional regions for each of the 6 layers for cube maps
 	}
 
-	{ // transition the image memory to shader-read-only-optimal layout [new]
+	{ // TRANSFER_DST_OPTIMAL -> final_layout. transition the image memory to shader-read-only-optimal layout
 		VkImageMemoryBarrier barrier{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 			.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, // waits until all transfer writes are complete, then transitions the image
@@ -358,9 +349,8 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,  //  Not transferring ownership between queues
 			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 			.image = target.handle, // The image to transition 
-			.subresourceRange = whole_image, // Affect the whole image 
+			.subresourceRange = mip_range,
 		};
-
 		vkCmdPipelineBarrier(
 			transfer_command_buffer, // commandBuffer
 			VK_PIPELINE_STAGE_TRANSFER_BIT, // srcStageMask
@@ -374,102 +364,14 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 
 	// end and submit the command buffer:
 	VK( vkEndCommandBuffer(transfer_command_buffer) );
-
-	VkSubmitInfo submit_info{ // what does this format mean//??
+	VkSubmitInfo submit_info{
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &transfer_command_buffer
+		.pCommandBuffers = &transfer_command_buffer,
 	};
-
 	VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, VK_NULL_HANDLE) );
-
-	// wait for command buffer to finish executing:
-	VK( vkQueueWaitIdle(rtg.graphics_queue) );
-
-	// destroy the source buffer:
-	destroy_buffer(std::move(transfer_src)); // what does move() mean //vv transfer ownership to the destroy function
-}
-
-void Helpers::transfer_to_image_mip(void const *data, size_t size, AllocatedImage &target, uint32_t mip_level, uint32_t layer_count) {
-	assert(target.handle != VK_NULL_HANDLE);
-
-	uint32_t mip_w = std::max(1u, target.extent.width >> mip_level);
-	uint32_t mip_h = std::max(1u, target.extent.height >> mip_level);
-
-	size_t bytes_per_block = vkuFormatTexelBlockSize(target.format);
-	size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
-	assert(size == mip_w * mip_h * layer_count * bytes_per_block / texels_per_block);
-
-	AllocatedBuffer transfer_src = create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Mapped);
-	std::memcpy(transfer_src.allocation.data(), data, size);
-
-	VK( vkResetCommandBuffer(transfer_command_buffer, 0) );
-	VkCommandBufferBeginInfo begin_info{
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	VK( vkBeginCommandBuffer(transfer_command_buffer, &begin_info) );
-
-	VkImageSubresourceRange mip_range{
-		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-		.baseMipLevel = mip_level,
-		.levelCount = 1,
-		.baseArrayLayer = 0,
-		.layerCount = layer_count,
-	};
-
-	{ // UNDEFINED -> TRANSFER_DST_OPTIMAL
-		VkImageMemoryBarrier barrier{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.srcAccessMask = 0,
-			.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = target.handle,
-			.subresourceRange = mip_range,
-		};
-		vkCmdPipelineBarrier(transfer_command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-	}
-
-	for (uint32_t layer = 0; layer < layer_count; layer++) {
-		VkBufferImageCopy region{
-			.bufferOffset = layer * (size / layer_count),
-			.bufferRowLength = mip_w,
-			.bufferImageHeight = mip_h,
-			.imageSubresource{
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-				.mipLevel = mip_level,
-				.baseArrayLayer = layer,
-				.layerCount = 1,
-			},
-			.imageOffset{ .x = 0, .y = 0, .z = 0 },
-			.imageExtent{ .width = mip_w, .height = mip_h, .depth = 1 },
-		};
-		vkCmdCopyBufferToImage(transfer_command_buffer, transfer_src.handle, target.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-	}
-
-	{ // TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-		VkImageMemoryBarrier barrier{
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-			.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-			.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.image = target.handle,
-			.subresourceRange = mip_range,
-		};
-		vkCmdPipelineBarrier(transfer_command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-	}
-
-	VK( vkEndCommandBuffer(transfer_command_buffer) );
-	VkSubmitInfo submit_info{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &transfer_command_buffer };
-	VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, VK_NULL_HANDLE) );
-	VK( vkQueueWaitIdle(rtg.graphics_queue) );
-	destroy_buffer(std::move(transfer_src));
+	VK( vkQueueWaitIdle(rtg.graphics_queue) ); // wait for command buffer to finish executing
+	destroy_buffer(std::move(transfer_src)); // destroy the source buffer:
 }
 
 //----------------------------

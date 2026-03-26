@@ -11,7 +11,9 @@ The 2D lookup texture outputs a scale and a bias value to the surface's Fresnel 
 
 #version 450
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the size of the local invocations per dimension in the compute shader
-layout(set=0, binding=0, rg32f) brdfLUT; // lookup table. use rg32f because only two outputs (scale and bias)
+layout(set=0, binding=0, rg32f) uniform image2D brdfLUT; // lookup table. use rg32f because only two outputs (scale and bias)
+
+const float PI = 3.14159265359;
 
 // Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
 float GeometrySchlickGGX(float NdotV, float roughness) {
@@ -110,7 +112,7 @@ vec2 IntegrateBRDF(float NdotV, float roughness) {
     return vec2(A, B);
 }
 
-int main() {
+void main() {
     ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy); // the output pixel this code is responsible for
     ivec2 size = imageSize(brdfLUT);
     if (outCoord.x >= size.x || outCoord.y >= size.y) return; // Valid pixel coordinates are 0 to size.x - 1
