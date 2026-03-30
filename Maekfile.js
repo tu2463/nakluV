@@ -34,12 +34,8 @@ common_objs = [
 	maek.CPP('Helpers.cpp'),
 ];
 
-const brdf_shaders = [
-	maek.GLSLC('brdf.comp'),
-];
-
 const main_objs = [
-	maek.CPP('Tutorial.cpp', undefined, { depends:[...brdf_shaders] }),
+	maek.CPP('Tutorial.cpp'),
 	maek.CPP('PosColVertex.cpp'),
 	maek.CPP('PosNorTexVertex.cpp'),
 	maek.CPP('PosNorTexTanVertex.cpp'),
@@ -91,7 +87,17 @@ cube_objs.push( maek.CPP('CubePipeline.cpp', undefined, { depends:[...cube_shade
 // link the executable
 const cube_exe = maek.LINK([...cube_objs], 'bin/cube');
 
-// -- 
+// -- A2-pbr brdf util --
+const brdf_shaders = [
+    maek.GLSLC('brdf.comp'),
+];
+const brdf_objs = [
+    maek.CPP('main-brdf.cpp', undefined, { depends:[...brdf_shaders] }),
+    ...common_objs,
+];
+const brdf_exe = maek.LINK([...brdf_objs], 'bin/brdf');
+
+// --
 // const prebuilt_objs = [ ];
 
 // //use the prebuilt refsol.o unless refsol.cpp exists:
@@ -108,7 +114,7 @@ const cube_exe = maek.LINK([...cube_objs], 'bin/cube');
 const main_exe = maek.LINK([...main_objs], 'bin/main');
 
 //default targets:
-maek.TARGETS = [main_exe, cube_exe];
+maek.TARGETS = [main_exe, cube_exe, brdf_exe];
 
 //- - - - - - - - - - - - - - - - - - - - -
 function custom_flags_and_rules() {

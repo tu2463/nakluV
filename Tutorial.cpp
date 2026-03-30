@@ -3,10 +3,6 @@
 #include "VK.hpp"
 // #include "refsol.hpp"
 
-static uint32_t brdf_comp_code[] =
-#include "spv/brdf.comp.inl"
-;
-
 #include "RGBE.hpp"
 #include "stb_image.h"
 
@@ -938,191 +934,20 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
-	{ // A2-pbr: BRDF split-sum LUT — precompute with brdf.comp on first run, cache as brdf_lut.bin
+	{ // A2-pbr: load BRDF split-sum LUT from brdf_lut.bin (generate with: ./bin/brdf)
 		// Fixed size matching Epic's recommendation (Karis 2013)
 		constexpr uint32_t BRDF_LUT_SIZE = 512;
 		constexpr char BRDF_LUT_PATH[] = "brdf_lut.bin";
 
 		std::vector<float> brdf_pixels(BRDF_LUT_SIZE * BRDF_LUT_SIZE * 2);
 
-		{ // load from cache if present; otherwise run brdf.comp on GPU and save
+		{ // load precomputed BRDF LUT from disk — generate with: ./bin/brdf [output.bin]
 			std::ifstream fin(BRDF_LUT_PATH, std::ios::binary);
 			if (fin.good()) {
 				fin.read(reinterpret_cast<char *>(brdf_pixels.data()), brdf_pixels.size() * sizeof(float));
 				std::cout << "Loaded BRDF LUT from " << BRDF_LUT_PATH << std::endl;
 			} else {
-				std::cout << "Precomputing BRDF LUT with brdf.comp (" << BRDF_LUT_SIZE << "x" << BRDF_LUT_SIZE << ")..." << std::endl;
-
-				// --- temporary resources only needed during precomputation ---
-				// Storage image: brdf.comp writes into this
-				Helpers::AllocatedImage compute_image = rtg.helpers.create_image(
-					VkExtent2D{.width = BRDF_LUT_SIZE, .height = BRDF_LUT_SIZE},
-					VK_FORMAT_R32G32_SFLOAT,
-					VK_IMAGE_TILING_OPTIMAL,
-					VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-				);
-
-				VkImageView compute_view = VK_NULL_HANDLE;
-				{
-					VkImageViewCreateInfo create_info{
-						.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-						.image = compute_image.handle,
-						.viewType = VK_IMAGE_VIEW_TYPE_2D,
-						.format = VK_FORMAT_R32G32_SFLOAT,
-						.subresourceRange{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
-					};
-					VK( vkCreateImageView(rtg.device, &create_info, nullptr, &compute_view) );
-				}
-
-				// descriptor set layout: set=0, binding=0, storage image
-				VkDescriptorSetLayout brdf_dsl = VK_NULL_HANDLE;
-				{
-					VkDescriptorSetLayoutBinding binding{
-						.binding = 0,
-						.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-						.descriptorCount = 1,
-						.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-					};
-					VkDescriptorSetLayoutCreateInfo create_info{
-						.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-						.bindingCount = 1, .pBindings = &binding,
-					};
-					VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &brdf_dsl) );
-				}
-
-				VkPipelineLayout brdf_pl = VK_NULL_HANDLE;
-				{
-					VkPipelineLayoutCreateInfo create_info{
-						.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-						.setLayoutCount = 1, .pSetLayouts = &brdf_dsl,
-					};
-					VK( vkCreatePipelineLayout(rtg.device, &create_info, nullptr, &brdf_pl) );
-				}
-
-				VkShaderModule brdf_module = rtg.helpers.create_shader_module(brdf_comp_code);
-				VkPipeline brdf_pipeline = VK_NULL_HANDLE;
-				{
-					VkComputePipelineCreateInfo create_info{
-						.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-						.stage = {
-							.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-							.stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-							.module = brdf_module,
-							.pName  = "main",
-						},
-						.layout = brdf_pl,
-					};
-					VK( vkCreateComputePipelines(rtg.device, VK_NULL_HANDLE, 1, &create_info, nullptr, &brdf_pipeline) );
-				}
-				vkDestroyShaderModule(rtg.device, brdf_module, nullptr);
-
-				// one-shot descriptor pool + set
-				VkDescriptorPool brdf_pool = VK_NULL_HANDLE;
-				{
-					VkDescriptorPoolSize ps{.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = 1};
-					VkDescriptorPoolCreateInfo create_info{
-						.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-						.maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &ps,
-					};
-					VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &brdf_pool) );
-				}
-				VkDescriptorSet brdf_set = VK_NULL_HANDLE;
-				{
-					VkDescriptorSetAllocateInfo ai{
-						.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-						.descriptorPool = brdf_pool, .descriptorSetCount = 1, .pSetLayouts = &brdf_dsl,
-					};
-					VK( vkAllocateDescriptorSets(rtg.device, &ai, &brdf_set) );
-
-					VkDescriptorImageInfo ii{.imageView = compute_view, .imageLayout = VK_IMAGE_LAYOUT_GENERAL};
-					VkWriteDescriptorSet w{
-						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-						.dstSet = brdf_set, .dstBinding = 0, .descriptorCount = 1,
-						.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, .pImageInfo = &ii,
-					};
-					vkUpdateDescriptorSets(rtg.device, 1, &w, 0, nullptr);
-				}
-
-				// record: transition → dispatch → transition → copy to readback buffer
-				VkCommandBufferBeginInfo begin_info{
-					.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-					.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-				};
-				VK( vkResetCommandBuffer(rtg.helpers.transfer_command_buffer, 0) );
-				VK( vkBeginCommandBuffer(rtg.helpers.transfer_command_buffer, &begin_info) );
-
-				VkImageSubresourceRange whole{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1};
-
-				{ // UNDEFINED -> GENERAL (storage image needs GENERAL layout)
-					VkImageMemoryBarrier b{
-						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-						.srcAccessMask = 0, .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-						.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-						.image = compute_image.handle, .subresourceRange = whole,
-					};
-					vkCmdPipelineBarrier(rtg.helpers.transfer_command_buffer,
-						VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-						0, 0, nullptr, 0, nullptr, 1, &b);
-				}
-
-				// dispatch one thread per texel; brdf.comp uses local_size (1,1,1)
-				vkCmdBindPipeline(rtg.helpers.transfer_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, brdf_pipeline);
-				vkCmdBindDescriptorSets(rtg.helpers.transfer_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, brdf_pl, 0, 1, &brdf_set, 0, nullptr);
-				vkCmdDispatch(rtg.helpers.transfer_command_buffer, BRDF_LUT_SIZE, BRDF_LUT_SIZE, 1);
-
-				{ // GENERAL -> TRANSFER_SRC for readback
-					VkImageMemoryBarrier b{
-						.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-						.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-						.oldLayout = VK_IMAGE_LAYOUT_GENERAL, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-						.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-						.image = compute_image.handle, .subresourceRange = whole,
-					};
-					vkCmdPipelineBarrier(rtg.helpers.transfer_command_buffer,
-						VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-						0, 0, nullptr, 0, nullptr, 1, &b);
-				}
-
-				// readback buffer (CPU-visible, mapped)
-				size_t readback_size = BRDF_LUT_SIZE * BRDF_LUT_SIZE * 2 * sizeof(float);
-				Helpers::AllocatedBuffer readback = rtg.helpers.create_buffer(
-					readback_size,
-					VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-					Helpers::Mapped
-				);
-
-				VkBufferImageCopy copy_region{
-					.bufferOffset = 0, .bufferRowLength = BRDF_LUT_SIZE, .bufferImageHeight = BRDF_LUT_SIZE,
-					.imageSubresource{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-					.imageOffset = {0, 0, 0}, .imageExtent = {BRDF_LUT_SIZE, BRDF_LUT_SIZE, 1},
-				};
-				vkCmdCopyImageToBuffer(rtg.helpers.transfer_command_buffer,
-					compute_image.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-					readback.handle, 1, &copy_region);
-
-				VK( vkEndCommandBuffer(rtg.helpers.transfer_command_buffer) );
-				VkSubmitInfo si{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &rtg.helpers.transfer_command_buffer};
-				VK( vkQueueSubmit(rtg.graphics_queue, 1, &si, VK_NULL_HANDLE) );
-				VK( vkQueueWaitIdle(rtg.graphics_queue) );
-
-				std::memcpy(brdf_pixels.data(), readback.allocation.data(), readback_size);
-
-				// save to disk for future runs
-				std::ofstream fout(BRDF_LUT_PATH, std::ios::binary);
-				fout.write(reinterpret_cast<char const *>(brdf_pixels.data()), readback_size);
-				std::cout << "Saved BRDF LUT to " << BRDF_LUT_PATH << std::endl;
-
-				// destroy all temporary compute resources
-				rtg.helpers.destroy_buffer(std::move(readback));
-				vkDestroyPipeline(rtg.device, brdf_pipeline, nullptr);
-				vkDestroyPipelineLayout(rtg.device, brdf_pl, nullptr);
-				vkDestroyDescriptorPool(rtg.device, brdf_pool, nullptr);
-				vkDestroyDescriptorSetLayout(rtg.device, brdf_dsl, nullptr);
-				vkDestroyImageView(rtg.device, compute_view, nullptr);
-				rtg.helpers.destroy_image(std::move(compute_image));
+				throw std::runtime_error(std::string(BRDF_LUT_PATH) + " not found. Run './bin/brdf' to precompute it.");
 			}
 		}
 
