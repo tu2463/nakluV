@@ -25,32 +25,32 @@ struct GPUFace {
     Helpers::AllocatedBuffer buffer;
     VkImageView view;
     VkDescriptorSet descriptors = VK_NULL_HANDLE;
-    void create(RTG& rtg, VkDescriptorPool descriptor_pool, CubePipeline const &cube_pipeline, uint32_t const sz, glm::vec3 * const data, int face_i) {
+    void create(RTG& rtg, VkDescriptorPool descriptor_pool, CubePipeline const &cube_pipeline, uint32_t const sz, glm::vec3 * const data, int face_i, bool is_input = false, uint32_t mip_levels = 1) {
         // add a 4th component to the data vector
-        std::vector< glm::vec4 > data_padded; 
+        std::vector< glm::vec4 > data_padded;
         data_padded.reserve(sz*sz);
         for (uint32_t i = 0; i < sz*sz; ++i) {
             data_padded.emplace_back(glm::vec4(data[i], 0.0f));
         }
-        
+
         // create image
         image = rtg.helpers.create_image(
             VkExtent2D{.width = sz, .height = sz},
-            VK_FORMAT_R32G32B32A32_SFLOAT, // why use this format for cube face image//vv I think it's because we need 4-component to support storage
+            VK_FORMAT_R32G32B32A32_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
-
-            /*
-            VK_IMAGE_USAGE_STORAGE_BIT: Compute shader can read/write pixels directly
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT: Can be the destination of a transfer — needed so transfer_to_image can upload the initial data to it
-            VK_IMAGE_USAGE_TRANSFER_SRC_BIT: Can be the source of a transfer — needed to copy results back out
-            */
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // allocate on GPU, not visible on CPU
-            Helpers::Unmapped // CPU won't map this memory
+            is_input
+                ? (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) // sampled for textureLod; TRANSFER_DST for mip 0 upload; TRANSFER_SRC for blitting down to lower mips
+                : (VK_IMAGE_USAGE_STORAGE_BIT  | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT), // storage for compute write; TRANSFER_SRC for readback
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            Helpers::Unmapped,
+            0,          // flags
+            1,          // arrayLayers
+            mip_levels  // mip levels: 1 for output faces; floor(log2(sz))+1 for input faces (GGX mode)
         );
 
-        // upload the image
-        rtg.helpers.transfer_to_image(data_padded.data(), sizeof(data_padded[0]) * sz * sz, image, 1, VK_IMAGE_LAYOUT_GENERAL);
+        // upload mip 0; transfer_to_image will leave it in SHADER_READ_ONLY_OPTIMAL (input) or GENERAL (output)
+        rtg.helpers.transfer_to_image(data_padded.data(), sizeof(data_padded[0]) * sz * sz, image, 1,
+            is_input ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL);
 
         // -- buffer --
         { // buffer
@@ -155,42 +155,42 @@ struct GPUFace {
         { // image view
             VkImageViewCreateInfo create_info{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .flags = 0, // normal image view; some other options are settings for density map
+                .flags = 0,
                 .format = image.format,
                 .image = image.handle,
                 .subresourceRange{
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, // Color data (not depth, not stencil) 
-                    .baseArrayLayer = 0, // Start at layer 0 
-                    .layerCount = 1, // Only 1 layer (not a cubemap or array texture)
-                    .baseMipLevel = 0, // Start at mip level 0 (full resolution) 
-                    .levelCount = 1, // Only 1 mip level (no mipmaps) 
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                    .baseMipLevel = 0,
+                    .levelCount = mip_levels, // expose full mip chain for input faces so textureLod can access all levels
                 },
-                .viewType = VK_IMAGE_VIEW_TYPE_2D, // some other options are: 1D texture for gradient, volumetric data, cubemap, array of textures/cubemaps
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
             };
             VK( vkCreateImageView(rtg.device, &create_info, nullptr, &view));
         }
 
-        { // descriptor set with world_from_px and storage image
+        { // descriptor set with world_from_px and image binding
+            VkDescriptorSetLayout layout = is_input ? cube_pipeline.set0_in_face : cube_pipeline.set1_out_face;
             { // allocate
                 VkDescriptorSetAllocateInfo alloc_info{
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                     .descriptorPool = descriptor_pool,
-                    .descriptorSetCount = 1, // the .create fn is called once by each face, creating one descriptor set for each GPUFace
-                    .pSetLayouts = &cube_pipeline.set01_face,
+                    .descriptorSetCount = 1,
+                    .pSetLayouts = &layout,
                 };
                 VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &descriptors ) );
             }
             { // write
-                VkDescriptorBufferInfo buffer_info{ // write buffer info into descriptor set
-                    .buffer = buffer.handle, // buffer was populated by transfer_to_buffer; it stores a CubePipeline::Face that holds the WORLD_FROM_PX
+                VkDescriptorBufferInfo buffer_info{
+                    .buffer = buffer.handle,
                     .offset = 0,
                     .range = buffer.size,
                 };
                 VkDescriptorImageInfo image_info{
-                    // this is a storage image (has VK_IMAGE_USAGE_STORAGE_BIT), which typically uses the GENERAL layout
-                    // Reference: https://docs.vulkan.org/guide/latest/storage_image_and_texel_buffers.html#:~:text=swift%20Copied!-,Image%20Formats%20for%20Storage%20Images,for%20both%20reading%20and%20writing.
-                    .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
-                    .imageView = view,
+                    .sampler     = is_input ? cube_pipeline.in_sampler : VK_NULL_HANDLE,
+                    .imageView   = view,
+                    .imageLayout = is_input ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL,
                 };
 
                 std::array< VkWriteDescriptorSet, 2> writes{
@@ -198,15 +198,15 @@ struct GPUFace {
                         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                         .descriptorCount = 1,
                         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        .dstArrayElement = 0, // Starting array index within the binding — 0 since this isn't an array descriptor
-                        .dstBinding = 0, // corresponds to the binding = N number delcared in shader AND in the VkDescriptorSetLayoutBinding in CubePipeline.cpp
-                        .dstSet = descriptors, // Which descriptor set to write into 
-                        .pBufferInfo = &buffer_info, // Points to a VkDescriptorBufferInfo specifying the actual buffer handle, offset, and range
+                        .dstArrayElement = 0,
+                        .dstBinding = 0,
+                        .dstSet = descriptors,
+                        .pBufferInfo = &buffer_info,
                     },
                     VkWriteDescriptorSet{
                         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                         .descriptorCount = 1,
-                        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        .descriptorType = is_input ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                         .dstArrayElement = 0,
                         .dstBinding = 1,
                         .dstSet = descriptors,
@@ -214,13 +214,7 @@ struct GPUFace {
                     }
                 };
 
-                vkUpdateDescriptorSets(
-                    rtg.device,
-                    uint32_t(writes.size()), // count of descriptor writes
-                    writes.data(),
-                    0, // descriptorCopyCount
-                    nullptr // pDescriptorCopies
-                );
+                vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
             }
         }
     }
@@ -335,17 +329,23 @@ int main (int argc, char **argv) {
             std::cout << "GGX: will generate " << ggx_mip_count << " mip levels." << std::endl;                                                                                              
         }
 
+        // mip levels for input faces: full chain for GGX (textureLod needs it), just 1 for Lambertian (texelFetch at lod=0)
+        uint32_t in_mip_levels = 1;
+        if (mode == CubePipeline::Mode::GGX) {
+            uint32_t s = sz;
+            while (s > 1) { s >>= 1; in_mip_levels++; }
+        }
+
         // create descriptors
-        // The pool was sized for 13 + 12 anticipating the full 6×2 face pipeline (all 12 faces + params); Prof's code only creates one in_face and one out_face.
         VkDescriptorPool in_descriptor_pool = VK_NULL_HANDLE; // pool for input faces
         { // create descriptor pool for input faces
             std::array< VkDescriptorPoolSize, 2> pool_sizes{
                 VkDescriptorPoolSize{
-                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // for the WORLD_FROM_PIXEL transform buffers
+                    .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                     .descriptorCount = 6,
                 },
                 VkDescriptorPoolSize{
-                    .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, // for the face images
+                    .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // sampler2D: supports textureLod for mip-level bias fix
                     .descriptorCount = 6,
                 }
             };
@@ -456,11 +456,128 @@ int main (int argc, char **argv) {
                 }
             }
 
-            // in_face and out_face each holds a descriptor set
-            in_faces[f].create(rtg, in_descriptor_pool, cube_pipeline, sz, data.data(), f);
+            in_faces[f].create(rtg, in_descriptor_pool, cube_pipeline, sz, data.data(), f, /*is_input=*/true, in_mip_levels);
         }
         stbi_image_free(in_data);
-        std::cout << "Created " << in_faces.size() << " input faces" << std::endl;
+        std::cout << "Created " << in_faces.size() << " input faces (" << in_mip_levels << " mip levels)" << std::endl;
+
+        // Generate mipmaps for input faces (GL_generateMipmap equivalent)
+        // Only needed for GGX: Lambertian uses texelFetch at lod=0 so mip chain isn't needed
+        if (in_mip_levels > 1) {
+            VK( vkResetCommandBuffer(command_buffer, 0) );
+            VkCommandBufferBeginInfo begin_info{
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            };
+            VK( vkBeginCommandBuffer(command_buffer, &begin_info) );
+
+            for (int f = 0; f < 6; f++) {
+                VkImage img = in_faces[f].image.handle;
+
+                // Mip 0 was left in SHADER_READ_ONLY_OPTIMAL by transfer_to_image; transition it to TRANSFER_SRC to use as blit source
+                VkImageMemoryBarrier to_src{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = img,
+                    .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+                };
+                vkCmdPipelineBarrier(command_buffer,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &to_src);
+
+                for (uint32_t mip = 1; mip < in_mip_levels; mip++) {
+                    int32_t src_w = (int32_t)std::max(1u, (uint32_t)sz >> (mip - 1));
+                    int32_t dst_w = (int32_t)std::max(1u, (uint32_t)sz >> mip);
+
+                    // Transition destination mip from UNDEFINED → TRANSFER_DST
+                    VkImageMemoryBarrier to_dst{
+                        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        .srcAccessMask = 0,
+                        .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image = img,
+                        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 1 },
+                    };
+                    vkCmdPipelineBarrier(command_buffer,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0, 0, nullptr, 0, nullptr, 1, &to_dst);
+
+                    // Blit mip-1 → mip (half resolution, linear filter)
+                    VkImageBlit blit{
+                        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 0, 1 },
+                        .srcOffsets = { {0, 0, 0}, {src_w, src_w, 1} },
+                        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1 },
+                        .dstOffsets = { {0, 0, 0}, {dst_w, dst_w, 1} },
+                    };
+                    vkCmdBlitImage(command_buffer,
+                        img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &blit, VK_FILTER_LINEAR);
+
+                    // Transition mip-1 from TRANSFER_SRC → SHADER_READ_ONLY (done with it as blit source)
+                    VkImageMemoryBarrier src_done{
+                        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image = img,
+                        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1, 0, 1 },
+                    };
+                    vkCmdPipelineBarrier(command_buffer,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        0, 0, nullptr, 0, nullptr, 1, &src_done);
+
+                    // Transition mip from TRANSFER_DST → TRANSFER_SRC for next iteration
+                    VkImageMemoryBarrier dst_to_src{
+                        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image = img,
+                        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 1 },
+                    };
+                    vkCmdPipelineBarrier(command_buffer,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0, 0, nullptr, 0, nullptr, 1, &dst_to_src);
+                }
+
+                // Transition last mip from TRANSFER_SRC → SHADER_READ_ONLY
+                VkImageMemoryBarrier last_done{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = img,
+                    .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, in_mip_levels - 1, 1, 0, 1 },
+                };
+                vkCmdPipelineBarrier(command_buffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &last_done);
+            }
+
+            VK( vkEndCommandBuffer(command_buffer) );
+            VkSubmitInfo si{ .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &command_buffer };
+            VK( vkQueueSubmit(rtg.graphics_queue, 1, &si, VK_NULL_HANDLE) );
+            VK( vkQueueWaitIdle(rtg.graphics_queue) );
+            std::cout << "Generated mipmaps for all 6 input faces." << std::endl;
+        }
 
         Helpers::AllocatedBuffer params_buffer;
         VkDescriptorSet params_descriptors = VK_NULL_HANDLE;

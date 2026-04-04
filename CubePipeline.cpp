@@ -32,7 +32,30 @@ void CubePipeline::create(RTG &rtg, Mode mode) {
         module = rtg.helpers.create_shader_module(cube_ggx_code);
     }
    
-    { // create the descriptor set layout  - set0_in layout holds input face info
+    { // set0_in_face: input face — binding0=UBO (WORLD_FROM_PX), binding1=COMBINED_IMAGE_SAMPLER for textureLod
+        std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
+            VkDescriptorSetLayoutBinding{
+                .binding = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            },
+            VkDescriptorSetLayoutBinding{
+                .binding = 1,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            },
+        };
+        VkDescriptorSetLayoutCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = uint32_t(bindings.size()),
+            .pBindings = bindings.data(),
+        };
+        VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set0_in_face) );
+    }
+
+    { // set1_out_face: output face — binding0=UBO (WORLD_FROM_PX), binding1=STORAGE_IMAGE)
         std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
             VkDescriptorSetLayoutBinding{
                 .binding = 0,
@@ -53,7 +76,23 @@ void CubePipeline::create(RTG &rtg, Mode mode) {
             .bindingCount = uint32_t(bindings.size()),
             .pBindings = bindings.data(),
         };
-        VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set01_face) );
+        VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_out_face) );
+    }
+
+    { // in_sampler: trilinear。 Credit: Bright dots in the pre-filter convolution from https://learnopengl.com/PBR/IBL/Specular-IBL
+        VkSamplerCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = VK_FILTER_LINEAR,
+            .minFilter = VK_FILTER_LINEAR, // bilinear within a mip level
+            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR, // bilinear between two mip
+            .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+            .mipLodBias = 0.0f,
+            .minLod = 0.0f,
+            .maxLod = VK_LOD_CLAMP_NONE,
+        };
+        VK( vkCreateSampler(rtg.device, &create_info, nullptr, &in_sampler) );
     }
 
     { // the set2 layout holds roughness info (and maybe more brdf params in the future):
@@ -76,9 +115,9 @@ void CubePipeline::create(RTG &rtg, Mode mode) {
 
     { // create pipeline layout
         std::array< VkDescriptorSetLayout, 3> layouts = {
-           set01_face,
-           set01_face,
-           set2_params,
+           set0_in_face, // set 0: input face (COMBINED_IMAGE_SAMPLER)
+           set1_out_face,   // set 1: output face (STORAGE_IMAGE)
+           set2_params,  // set 2: roughness params
         };
         VkPipelineLayoutCreateInfo create_info{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -119,14 +158,20 @@ void CubePipeline::destroy(RTG &rtg) {
         layout = VK_NULL_HANDLE;
     }
 
+    if (in_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(rtg.device, in_sampler, nullptr);
+        in_sampler = VK_NULL_HANDLE;
+    }
     if (set2_params != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(rtg.device, set2_params, nullptr);
         set2_params = VK_NULL_HANDLE;
     }
-
-    if (set01_face != VK_NULL_HANDLE)
-    {
-        vkDestroyDescriptorSetLayout(rtg.device, set01_face, nullptr);
-        set01_face = VK_NULL_HANDLE;
+    if (set1_out_face != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(rtg.device, set1_out_face, nullptr);
+        set1_out_face = VK_NULL_HANDLE;
+    }
+    if (set0_in_face != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(rtg.device, set0_in_face, nullptr);
+        set0_in_face = VK_NULL_HANDLE;
     }
 }

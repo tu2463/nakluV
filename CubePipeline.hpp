@@ -3,7 +3,7 @@
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 struct CubePipeline {
     // descriptor set layouts:
-    /*. set01_face is the layout shared by two descriptor sets (one for in_face, one for out_face), 
+    /*. set1_out_face is the layout shared by two descriptor sets (one for in_face, one for out_face), 
     because input and output faces have identical structure
     
     Layout:                                                                                                                                                                                                              
@@ -11,15 +11,17 @@ struct CubePipeline {
     binding 1 → VK_DESCRIPTOR_TYPE_STORAGE_IMAGE    (face pixel data)     
     
     When creating the pipeline layout: std::array< VkDescriptorSetLayout, 3 > layouts{
-            set01_face,
-            set01_face,
+            set1_out_face,
+            set1_out_face,
             set2_params,
         };
     */
     enum class Mode { Lambertian, GGX };
 
-    VkDescriptorSetLayout set01_face = VK_NULL_HANDLE;
-	VkDescriptorSetLayout set2_params = VK_NULL_HANDLE; //used for ggx only
+    VkDescriptorSetLayout set0_in_face = VK_NULL_HANDLE; // input face: binding0=UBO, binding1=COMBINED_IMAGE_SAMPLER (sampler2D, supports textureLod)
+    VkDescriptorSetLayout set1_out_face = VK_NULL_HANDLE;  // output face: binding0=UBO, binding1=STORAGE_IMAGE (image2D, writable)
+	VkDescriptorSetLayout set2_params = VK_NULL_HANDLE; // used for ggx only
+    VkSampler in_sampler = VK_NULL_HANDLE; // for reading mip hierarchy to denoise
 
     // types for descriptors:
     struct Face

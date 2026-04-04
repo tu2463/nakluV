@@ -10,7 +10,7 @@ layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in; // defining the
 layout(set=0, binding=0, std140) uniform Inface {
     mat3x3 WORLD_FROM_IN_PX;
 };
-layout(set=0, binding=1, rgba32f) uniform restrict readonly image2D inFace;
+layout(set=0, binding=1) uniform sampler2D inFace; // changed from image2D to sampler2D to denoise.
 
 layout(set=1, binding=0, std140) uniform OutFace {
     mat3x3 WORLD_FROM_OUT_PX;
@@ -63,6 +63,16 @@ float RadicalInverse_VdC(uint bits) {
 vec2 Hammersley(uint i, uint N) {
     return vec2(float(i)/float(N), RadicalInverse_VdC(i));
 }
+
+// Credit: Direct lighting from https://learnopengl.com/PBR/Lighting
+float DistributionGGX(float NdotH, float Roughness) {
+    float a  = Roughness * Roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    return a2 / denom;
+}
 #endif
 
 void main() {
@@ -76,7 +86,7 @@ void main() {
 
     // imageSize: retrieve the dimensions of an image. Returns ivec2 for 2D image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageSize.xhtml
     ivec2 outSize = imageSize(outFace);
-    ivec2 inSize = imageSize(inFace);
+    ivec2 inSize = textureSize(inFace, 0);
 
     if (outCoord.x >= outSize.x || outCoord.y >= outSize.y) return; // Valid pixel coordinates are 0 to outSize.x - 1
 
@@ -105,7 +115,7 @@ void main() {
             // calculates how much radiance from direction in_dir reaches the surface facing n
 
             // imageLoad: load a single texel from an image. https://registry.khronos.org/OpenGL-Refpages/gl4/html/imageLoad.xhtml
-            vec3 Li = imageLoad(inFace, ivec2(x, y)).rgb;
+            vec3 Li = texelFetch(inFace, ivec2(x, y), 0).rgb;
 
             // WORLD_FROM_IN_PX does: (px, py, 1) -> world_dir_unnormalized
             vec3 in_dir = WORLD_FROM_IN_PX * vec3(float(x), float(y), 1.0); // not normalized yet
@@ -151,17 +161,30 @@ void main() {
     for (uint i = 0u; i < SAMPLE_COUNT; i++) {
         vec2 Xi = Hammersley(i, SAMPLE_COUNT);
         vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+        float NdotH = clamp(dot(N, H), 0.0, 1.0);
+        float HdotV = clamp(dot(H, V), 0.0, 1.0);
+
+        // Credit: Bright dots in the pre-filter convolution from https://learnopengl.com/PBR/IBL/Specular-IBL
+        float D   = DistributionGGX(NdotH, roughness);
+        float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001;
+        float resolution = float(inSize.x); // resolution of source cubemap (per face)
+        float saTexel  = 4.0 * PI / (6.0 * resolution * resolution);
+        float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 0.0001);
+        float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(saSample / saTexel);
+
         vec3 L  = normalize(2.0 * dot(V, H) * H - V);
 
         float NdotL = clamp(dot(N, L), 0.0, 1.0);
         if (NdotL > 0.0) {
-                // logic equivalent for: texture(envMap, L).rgb
+                // logic equivalent for: textureLod(envMap, L, mipLevel).rgb
                 vec3 in_dir = IN_PX_FROM_WORLD * L; // WORLD_FROMIN_PX_FROM_WORLD_IN_PX does: world_dir_unnormalized -> (px * k, py * k, 1 * k)
                 if (in_dir.z <= 0) continue; // dir is behind the face
                 float px_float = in_dir.x / in_dir.z;
                 float py_float = in_dir.y / in_dir.z;
-                if (px_float < 0.0 || px_float >= float(inSize.x) || py_float < 0.0 || py_float >= float(inSize.y)) continue; // does not hit current face                                                                                     
-                vec3 Li = imageLoad(inFace, ivec2(px_float, py_float)).rgb;                                                                                                                                                                                          
+                if (px_float < 0.0 || px_float >= float(inSize.x) || py_float < 0.0 || py_float >= float(inSize.y)) continue; // does not hit current face
+                vec2 uv = vec2(px_float / float(inSize.x), py_float / float(inSize.y));
+                // textureLod: perform a texture lookup with explicit level-of-detail. Credit: https://registry.khronos.org/OpenGL-Refpages/gl4/html/textureLod.xhtml
+                vec3 Li = textureLod(inFace, uv, mipLevel).rgb;
 
                 prefiltered_color += Li * NdotL; // radiance from inFace
                 total_weight += NdotL; // samples with less influence on the final result (for small NdotL) contribute less to the final weight
