@@ -897,7 +897,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 						.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 						.descriptorPool = texture_descriptor_pool,
 						.descriptorSetCount = 1,
-						.pSetLayouts = &objects_pipeline.set6_GGXSpecularMap,
+						.pSetLayouts = &objects_pipeline.set6_GGXPrefilteredEnvMap,
 					};
 					VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &ggx_descriptors) );
 

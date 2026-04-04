@@ -74,7 +74,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE;
-		VkDescriptorSetLayout set6_GGXSpecularMap = VK_NULL_HANDLE; // prefiltered GGX specular mipmap
+		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // prefiltered GGX specular mipmap
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
 
 		// types for descriptors:

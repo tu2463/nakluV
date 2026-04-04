@@ -128,7 +128,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set5_NormalMap) );
 	}
 
-	{ // A2-pbr: the set6_GGXSpecularMap
+	{ // A2-pbr: the set6_GGXPrefilteredEnvMap
 		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
 			VkDescriptorSetLayoutBinding{
 				.binding = 0,
@@ -144,7 +144,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.pBindings = bindings.data(),
 		};
 
-		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set6_GGXSpecularMap) );
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set6_GGXPrefilteredEnvMap) );
 	}
 
 	{ // A2-pbr: the set7_BRDFLookup (2D sampler for split-sum BRDF LUT)
@@ -178,7 +178,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			set3_CubeMap,
 			set4_LambertianCubeMap,
 			set5_NormalMap,
-			set6_GGXSpecularMap,
+			set6_GGXPrefilteredEnvMap,
 			set7_BRDFLookup,
 		};
 		
@@ -336,9 +336,9 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 		set5_NormalMap = VK_NULL_HANDLE;
 	}
 
-	if (set6_GGXSpecularMap != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(rtg.device, set6_GGXSpecularMap, nullptr);
-		set6_GGXSpecularMap = VK_NULL_HANDLE;
+	if (set6_GGXPrefilteredEnvMap != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set6_GGXPrefilteredEnvMap, nullptr);
+		set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE;
 	}
 
 	if (set7_BRDFLookup != VK_NULL_HANDLE) {

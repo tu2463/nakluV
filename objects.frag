@@ -12,7 +12,7 @@ layout(set=2, binding=0) uniform sampler2D TEXTURE;
 layout(set=3, binding=0) uniform samplerCube cubeMap; // radiance cubemap (mirror / environment materials); binding=0 was specified at VkDescriptorSetLayoutBinding
 layout(set=4, binding=0) uniform samplerCube lambertianCubeMap; // prefiltered irradiance cubemap (X.lambertian.png, lambertian material)
 layout(set=5, binding=0) uniform sampler2D normalMap; // A2-normal
-layout(set=6, binding=0) uniform samplerCube ggxSpecularMap; // A2-pbr, GGX prefiltered mip map (X.ggx.N.png). Credit: Completing the IBL reflectance from https://learnopengl.com/PBR/IBL/Specular-IBL
+layout(set=6, binding=0) uniform samplerCube ggxPrefilteredEnvMap; // A2-pbr, GGX prefiltered mip map (X.ggx.N.png). Credit: Completing the IBL reflectance from https://learnopengl.com/PBR/IBL/Specular-IBL
 layout(set=7, binding=0) uniform sampler2D brdfLUT; // BRDF lookup table precomputed by brdf.comp
 
 layout(push_constant) uniform Push {
@@ -87,7 +87,7 @@ void main() {
 
         // highest mip level index 
         const float MAX_REFLECTION_LOD = 4.0; // A2-pbr-TODO: The LearnOpenGL tutorial creates and loads 4 mipmaps at most. maybe we don't need this constraint. In the pre-filter step we only convoluted the environment map up to a maximum of 5 mip levels (0 to 4), which we denote here as MAX_REFLECTION_LOD to ensure we don't sample a mip level where there's no (relevant) data.
-        vec3 prefilteredColor = textureLod(ggxSpecularMap, R,  roughness * MAX_REFLECTION_LOD).rgb;  // sample the appropriate mip level based on the surface roughness, giving rougher surfaces blurrier specular reflections
+        vec3 prefilteredColor = textureLod(ggxPrefilteredEnvMap, R,  roughness * MAX_REFLECTION_LOD).rgb;  // sample the appropriate mip level based on the surface roughness, giving rougher surfaces blurrier specular reflections
 
         // mix(): linearly interpolate between two values
         // Credit: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metal-brdf-and-dielectric-brdf
