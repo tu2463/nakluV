@@ -935,8 +935,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	}
 
 	{ // A2-pbr: load BRDF split-sum LUT from brdf_lut.bin (generate with: ./bin/brdf)
-		// Fixed size matching Epic's recommendation (Karis 2013)
-		constexpr uint32_t BRDF_LUT_SIZE = 512;
+		constexpr uint32_t BRDF_LUT_SIZE = 512; // same as LUT_SIZE in main-brdf.cpp
 		constexpr char BRDF_LUT_PATH[] = "brdf_lut.bin";
 
 		std::vector<float> brdf_pixels(BRDF_LUT_SIZE * BRDF_LUT_SIZE * 2);

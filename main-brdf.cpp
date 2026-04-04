@@ -11,14 +11,11 @@ static uint32_t brdf_comp_code[] =
 
 /*
 BRDF LUT precomputation utility
-Mirrors main-cube.cpp. Runs brdf.comp on the GPU to integrate the split-sum
-BRDF (scale, bias) for all (NdotV, roughness) pairs and writes the result to
-a raw RG32F binary file brdf_lut.bin).
+Runs brdf.comp on the GPU to integrate the split-sum BRDF (scale, bias) for all (NdotV, roughness) pairs and writes the result to a raw RG32F binary file brdf_lut.bin).
 
-Usage: ./bin/brdf [output.bin]
+Usage: /bin/brdf
 
-The output is a 512x512 grid of (scale, bias) float pairs — same layout that
-Tutorial.cpp's BRDF LUT sampler expects. Generate once, then commit or cache.
+The output is a 512*512 grid of (scale, bias) float pairs.
 */
 int main(int argc, char **argv) {
     std::string OUT_PATH = "brdf_lut.bin";

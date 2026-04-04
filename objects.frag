@@ -47,8 +47,13 @@ float tonemap_aces(float x) {
 
 // Credit: https://learnopengl.com/PBR/IBL/Specular-IBL
 // Fresnel-Schlick with roughness: at grazing angles, rougher surfaces reflect less sharply
+// Fresnel描述的是：光从一种介质射到另一种介质边界时，有多少比例被反射、多少比例折射进去。
 vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) { //??-A2-PBR
-    // Fresnel-Schlick: F = F0 + (1 - F0) * (1 - cosθ)^5
+    // 真实 Fresnel 方程很复杂，实时渲染用Fresnel-Schlick近似: F = F0 + (1 - F0) * (1 - cosθ)^5
+    // F0：正视角（θ=0）时的反射率，材质固有属性（非金属（塑料、皮肤）≈ 0.04（约 4% 反射）；金属（铁、金）= albedo 颜色本身（60~90%））  
+    // cosTheta: θ=0（正视）→ F = F0（最小反射）(光垂直打到表面，大部分光折射进入材质内部，只有一小部分被反射回来e.g.正对着玻璃窗看，能清楚看到窗外，玻璃几乎透明）
+    //           θ=90°（掠射）→ F = 1（全反射）（光几乎平行于表面掠过，几乎没有光能折射进去，几乎全部被反射回来，反射率 → 1（100%））
+    // (1 - cosθ)^5：控制从 F0 到 1 的过渡曲线
     // the max() prevents F from going below F0
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
@@ -90,18 +95,20 @@ void main() {
 
         // sample from the BRDF lookup texture given the material's roughness and the angle between the normal and view vector:
         vec3 F = FresnelSchlickRoughness(NdotV, F0, roughness); // the indirect Fresnel results
+        // Fresnel 的直觉：掠射角（grazing angle）下几乎所有光都镜面反射（比如水面斜看几乎是镜子），正视角下反射最少。 
 
         // diffuse IBL part of the reflectance equation:
-        vec3 kS = F;
-        vec3 kD = 1.0 - kS;
-        kD *= 1.0 - metalness;
+        // kD 和 kS 是漫反射和镜面反射的能量权重，代表入射光中有多少比例走漫反射、多少比例走镜面反射。
+        vec3 kS = F; // kS描述在给定视角下有多少光被镜面反射
+        vec3 kD = 1.0 - kS; // 剩余给漫反射
+        kD *= 1.0 - metalness; // Metalness 对 kD 的修正：金属没有漫反射（diffuse)，导体会立刻吸收折射进去的光，不会从内部散射出来。所以metalness = 0 (non-metal) => kD stays the same; =1 (metal) => only specular
         vec3 irradiance = texture(lambertianCubeMap, n).rgb; // prefiltered irradiance in direction n
         vec3 diffuse = irradiance * albedo;
 
         vec2 envBRDF = texture(brdfLUT, vec2(NdotV, roughness)).rg; // scale and bias to F0
         vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y); // combine scale+bias with the prefiltered env color (left portion of the IBL reflectance equation and re-construct the approximated integral result as specular)
 
-        hdr = (kD * diffuse + specular) * pow(2.0, float(exposure));
+        hdr = (kD * diffuse + specular) * pow(2.0, float(exposure)); // combine diffuse + specular + exposure
     } else {
         vec3 mat_light;
         if (material_type == 1) { // lambertian: sample the prefiltered irradiance cubemap at n; stores (incoming radiance at n)/PI, multiplying by albedo gives Lambertian output
