@@ -2096,6 +2096,7 @@ void Tutorial::update(float dt) {
 		// TODO: think about - can we move this chunk outside of update? is it necessary to re-traverse the tree and re-create object instances every frame?
 		object_instances.clear();
 		scene_camera_instances.clear();
+		light_instances.clear();
 
 		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
 
@@ -2251,6 +2252,13 @@ void Tutorial::update(float dt) {
 			if (node->camera != nullptr) {
 				scene_camera_instances.emplace_back(SceneCamera{
 					.camera = node->camera,
+					.WORLD_FROM_LOCAL = world,
+				});
+			}
+
+			if (node->light != nullptr) {
+				light_instances.emplace_back(Light{
+					.light = node->light,
 					.WORLD_FROM_LOCAL = world,
 				});
 			}

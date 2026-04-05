@@ -281,7 +281,6 @@ struct Tutorial : RTG::Application {
 		float far_plane;
 	} frustum;
 
-	// Credit: adapted from More (Robust) Frustum Culling by Bruno Opsenica
 	struct OBB {
 		vec3 center = {};
 		vec3 extents = {};
@@ -322,6 +321,14 @@ struct Tutorial : RTG::Application {
 	mat4 CLIP_FROM_WORLD_CULLING;  // the culling frustum matrix  
   	mat4 CAMERA_FROM_WORLD; // for transforming object positions into camera space for culling
 
+	// -- lights -- 
+	struct Light {
+		S72::Light *light; // reference to the light data for this object, which includes shadow, type, tint
+		mat4 WORLD_FROM_LOCAL;
+	};
+	std::vector < Light > light_instances;
+
+	// -- objects --
 	std::vector< LinesPipeline::Vertex > lines_vertices;
 
 	ObjectsPipeline::World world;
