@@ -69,14 +69,13 @@ struct Tutorial : RTG::Application {
 	struct ObjectsPipeline {
 		// descriptor set layouts:
 		VkDescriptorSetLayout set0_World = VK_NULL_HANDLE;
-		VkDescriptorSetLayout set1_Transforms;
+		VkDescriptorSetLayout set1_TransformsAndLights;
 		VkDescriptorSetLayout set2_TEXTURE;
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE; // A2-normal
 		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // A2-pbr prefiltered GGX specular mipmap
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
-		VkDescriptorSetLayout set8_Lights = VK_NULL_HANDLE; // A3-materials
 
 		// types for descriptors:
 		struct World {
@@ -191,12 +190,11 @@ struct Tutorial : RTG::Application {
 		// location for ObjectsPipeline::Transforms data: (streamed to GPU per-frame)
 		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Transforms; // device-local
-		VkDescriptorSet Transforms_descriptors; // references Transforms, the descriptor set
+		VkDescriptorSet Transforms_descriptors; // references Transforms (binding 0) and Lights (binding 1)
 
 		// Light may change per frame, so these buffers need to be in workspace.
 		Helpers::AllocatedBuffer Lights_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Lights; // device-local
-		VkDescriptorSet Lights_descriptors; // references Lights, the descriptor set
 	};
 	std::vector< Workspace > workspaces;
 

@@ -177,7 +177,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			},
 			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1 * per_workspace, // one descriptor per set, one set per workspace
+				.descriptorCount = 2 * per_workspace, // one descriptor per set, two set (Transforms + Lights) per workspace
 			},
 		};
 
@@ -261,13 +261,13 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 				.descriptorPool = descriptor_pool,
 				.descriptorSetCount = 1,
-				.pSetLayouts = &objects_pipeline.set1_Transforms,
+				.pSetLayouts = &objects_pipeline.set1_TransformsAndLights,
 			};
 
 			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Transforms_descriptors) ); // NOTE: we will fill in this descriptor set in render when buffers are [re-]allocated
 		}
 
-		// descriptor write:
+		// descriptor write for World and Camera:
 		{ //point descriptor to Camera buffer:
 			VkDescriptorBufferInfo Camera_info{
 				.buffer = workspace.Camera.handle,
@@ -786,6 +786,48 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		);
 	}
 
+	{ // A2-normal: allocate and write the normal map descriptor set
+		VkDescriptorSetAllocateInfo alloc_info {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.descriptorPool = texture_descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &objects_pipeline.set5_NormalMap,
+		};
+		normal_map_descriptors.assign(normal_maps.size(), VK_NULL_HANDLE); // .resize() preserves the existing elements; .assign() discards all existign elements
+		for (size_t i = 0; i < normal_maps.size(); i++) {
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &normal_map_descriptors[i]) );
+		}
+
+		// write descriptors:
+		std::vector< VkDescriptorImageInfo > infos(normal_map_views.size());
+		std::vector< VkWriteDescriptorSet > writes(normal_map_views.size());
+
+		size_t view_i = 0;
+		for (size_t tex_i = 0; tex_i < normal_maps.size(); tex_i++) {
+			infos[view_i] = VkDescriptorImageInfo{
+				.sampler = texture_sampler,// how to sample (filtering, wrapping, etc.) 
+				.imageView = normal_map_views[view_i], // which normal_map image to sample from; view_i tracks position in normal_map_views
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
+			};
+			writes[view_i] = VkWriteDescriptorSet{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = normal_map_descriptors[tex_i], // which descriptor set to update; tex_i is the normal_maps index (matches inst.normal_map)
+				.dstBinding = 0,// binding index within that set (matches layout)
+				.dstArrayElement = 0,// starting array index (for arrayed bindings) 
+				.descriptorCount = 1,// updating 1 descriptor
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
+				.pImageInfo = &infos[view_i],
+			};
+			view_i++;
+		}
+
+		vkUpdateDescriptorSets(
+			rtg.device,
+			uint32_t(writes.size()), writes.data(), // descriptorWrites count, descriptorWrites
+			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
+		);
+	}
+
 	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
 		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
 			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
@@ -989,7 +1031,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			VK( vkCreateSampler(rtg.device, &create_info, nullptr, &brdf_lut_sampler) );
 		}
 
-		{ // allocate and write descriptor set
+		{ // allocate and write descriptor set for BRDF LUT (set=7)
 			VkDescriptorSetAllocateInfo alloc_info{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 				.descriptorPool = texture_descriptor_pool,
@@ -1016,48 +1058,6 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			};
 			vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 		}
-	}
-
-	{ // allocate and write the normal map descriptor set
-		VkDescriptorSetAllocateInfo alloc_info {
-			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-			.descriptorPool = texture_descriptor_pool,
-			.descriptorSetCount = 1,
-			.pSetLayouts = &objects_pipeline.set5_NormalMap,
-		};
-		normal_map_descriptors.assign(normal_maps.size(), VK_NULL_HANDLE); // .resize() preserves the existing elements; .assign() discards all existign elements
-		for (size_t i = 0; i < normal_maps.size(); i++) {
-			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &normal_map_descriptors[i]) );
-		}
-
-		// write descriptors:
-		std::vector< VkDescriptorImageInfo > infos(normal_map_views.size());
-		std::vector< VkWriteDescriptorSet > writes(normal_map_views.size());
-
-		size_t view_i = 0;
-		for (size_t tex_i = 0; tex_i < normal_maps.size(); tex_i++) {
-			infos[view_i] = VkDescriptorImageInfo{
-				.sampler = texture_sampler,// how to sample (filtering, wrapping, etc.) 
-				.imageView = normal_map_views[view_i], // which normal_map image to sample from; view_i tracks position in normal_map_views
-				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, // expected layout during shader access
-			};
-			writes[view_i] = VkWriteDescriptorSet{
-				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-				.dstSet = normal_map_descriptors[tex_i], // which descriptor set to update; tex_i is the normal_maps index (matches inst.normal_map)
-				.dstBinding = 0,// binding index within that set (matches layout)
-				.dstArrayElement = 0,// starting array index (for arrayed bindings) 
-				.descriptorCount = 1,// updating 1 descriptor
-				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // matches with the descriptor type in descriptor set layout (set2_TEXTURE) 
-				.pImageInfo = &infos[view_i],
-			};
-			view_i++;
-		}
-
-		vkUpdateDescriptorSets(
-			rtg.device,
-			uint32_t(writes.size()), writes.data(), // descriptorWrites count, descriptorWrites
-			0, nullptr // descriptorCopies count, data - what are these //vv specifies that we are updating the descriptor sets by writing new data into it instead of copying one set to another 
-		);
 	}
 }
 

@@ -35,13 +35,19 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set0_World) );
 	}
 
-	{ // the set1_Transforms layout holds an array of Transform sturctures in a storage buffer used in the vertex shader:
-		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
+	{ // set1_TransformsAndLights: binding 0 = Transforms SSBO (vertex), binding 1 = Lights SSBO (fragment)
+		std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
 			VkDescriptorSetLayoutBinding{
 				.binding = 0,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT // vertex stage (for vertex shader, not for fragment shader)
+				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+			},
+			VkDescriptorSetLayoutBinding{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			},
 		};
 
@@ -51,7 +57,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.pBindings = bindings.data(),
 		};
 
-		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_Transforms) );
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_TransformsAndLights) );
 	}
 
 	{ // the set2_TEXTURE layout has a single descriptor for a sampler2D used in the fragment shader:
@@ -164,23 +170,6 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set7_BRDFLookup) );
 	}
 
-	{ // set8_Lights: SSBO for light
-		std::array< VkDescriptorSetLayoutBinding, 1 > bindings{
-			VkDescriptorSetLayoutBinding{
-				.binding = 0,
-				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-				.descriptorCount = 1,
-				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-			},
-		};
-		VkDescriptorSetLayoutCreateInfo create_info{
-			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			.bindingCount = uint32_t(bindings.size()),
-			.pBindings = bindings.data(),
-		};
-		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set8_Lights) );
-	}
-
 	{ // create pipeline layout; why do we need blocks like this in C++ //vv simple syntax
 		VkPushConstantRange range{
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -188,16 +177,15 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.size = sizeof(Push),
 		};
 
-		std::array< VkDescriptorSetLayout, 9 > layouts{
+		std::array< VkDescriptorSetLayout, 8 > layouts{
 			set0_World,
-			set1_Transforms,
+			set1_TransformsAndLights,
 			set2_TEXTURE,
 			set3_CubeMap,
 			set4_LambertianCubeMap,
 			set5_NormalMap,
 			set6_GGXPrefilteredEnvMap,
 			set7_BRDFLookup,
-			set8_Lights,
 		};
 		
 		VkPipelineLayoutCreateInfo create_info{ // what does this syntax mean again //vv
@@ -329,9 +317,9 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 		set0_World = VK_NULL_HANDLE;
 	}
 
-	if (set1_Transforms != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(rtg.device, set1_Transforms, nullptr);
-		set1_Transforms = VK_NULL_HANDLE;
+	if (set1_TransformsAndLights != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set1_TransformsAndLights, nullptr);
+		set1_TransformsAndLights = VK_NULL_HANDLE;
 	}
 
 	if (set2_TEXTURE != VK_NULL_HANDLE) {
@@ -362,11 +350,6 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 	if (set7_BRDFLookup != VK_NULL_HANDLE) {
 		vkDestroyDescriptorSetLayout(rtg.device, set7_BRDFLookup, nullptr);
 		set7_BRDFLookup = VK_NULL_HANDLE;
-	}
-
-	if (set8_Lights != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(rtg.device, set8_Lights, nullptr);
-		set8_Lights = VK_NULL_HANDLE;
 	}
 
 	if (layout != VK_NULL_HANDLE) {
