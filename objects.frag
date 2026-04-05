@@ -48,7 +48,7 @@ float tonemap_aces(float x) {
 // Credit: https://learnopengl.com/PBR/IBL/Specular-IBL
 // Fresnel-Schlick with roughness: at grazing angles, rougher surfaces reflect less sharply
 // Fresnel描述的是：光从一种介质射到另一种介质边界时，有多少比例被反射、多少比例折射进去。
-vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) { //??-A2-PBR
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     // 真实 Fresnel 方程很复杂，实时渲染用Fresnel-Schlick近似: F = F0 + (1 - F0) * (1 - cosθ)^5
     // F0：正视角（θ=0）时的反射率，材质固有属性（非金属（塑料、皮肤）≈ 0.04（约 4% 反射）；金属（铁、金）= albedo 颜色本身（60~90%））  
     // cosTheta: θ=0（正视）→ F = F0（最小反射）(光垂直打到表面，大部分光折射进入材质内部，只有一小部分被反射回来e.g.正对着玻璃窗看，能清楚看到窗外，玻璃几乎透明）

@@ -69,7 +69,7 @@ void RTG::Configuration::parse(int argc, char **argv) {
 			if (culling_mode != "none" && culling_mode != "frustum") {
 				throw std::runtime_error("--culling must be 'none' or 'frustum'.");
 			}
-		} else if (arg == "--exposure") {
+		} else if (arg == "--exposure") { // A2-tone
 			if (argi + 1 >= argc) throw std::runtime_error("--exposure requires a numeric argument.");
 			argi += 1;
 			try {

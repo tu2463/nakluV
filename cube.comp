@@ -168,26 +168,27 @@ void main() {
         float D   = DistributionGGX(NdotH, roughness);
         float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001;
         float resolution = float(inSize.x); // resolution of source cubemap (per face)
-        float saTexel  = 4.0 * PI / (6.0 * resolution * resolution);
-        float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 0.0001);
+        float saTexel  = 4.0 * PI / (6.0 * resolution * resolution); // how much solid angle one source cubemap texel covers
+        float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 0.0001); // how much solid angle this Monte Carlo sample covers
+        // If one sample covers a bigger area than one texel, you should sample a blurrier mip.
         float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(saSample / saTexel);
 
         vec3 L  = normalize(2.0 * dot(V, H) * H - V);
 
         float NdotL = clamp(dot(N, L), 0.0, 1.0);
         if (NdotL > 0.0) {
-                // logic equivalent for: textureLod(envMap, L, mipLevel).rgb
-                vec3 in_dir = IN_PX_FROM_WORLD * L; // WORLD_FROMIN_PX_FROM_WORLD_IN_PX does: world_dir_unnormalized -> (px * k, py * k, 1 * k)
-                if (in_dir.z <= 0) continue; // dir is behind the face
-                float px_float = in_dir.x / in_dir.z;
-                float py_float = in_dir.y / in_dir.z;
-                if (px_float < 0.0 || px_float >= float(inSize.x) || py_float < 0.0 || py_float >= float(inSize.y)) continue; // does not hit current face
-                vec2 uv = vec2(px_float / float(inSize.x), py_float / float(inSize.y));
-                // textureLod: perform a texture lookup with explicit level-of-detail. Credit: https://registry.khronos.org/OpenGL-Refpages/gl4/html/textureLod.xhtml
-                vec3 Li = textureLod(inFace, uv, mipLevel).rgb;
+            // logic equivalent for: textureLod(envMap, L, mipLevel).rgb
+            vec3 in_dir = IN_PX_FROM_WORLD * L; // WORLD_FROMIN_PX_FROM_WORLD_IN_PX does: world_dir_unnormalized -> (px * k, py * k, 1 * k)
+            if (in_dir.z <= 0) continue; // dir is behind the face
+            float px_float = in_dir.x / in_dir.z;
+            float py_float = in_dir.y / in_dir.z;
+            if (px_float < 0.0 || px_float >= float(inSize.x) || py_float < 0.0 || py_float >= float(inSize.y)) continue; // does not hit current face
+            vec2 uv = vec2(px_float / float(inSize.x), py_float / float(inSize.y));
+            // textureLod: perform a texture lookup with explicit level-of-detail. Credit: https://registry.khronos.org/OpenGL-Refpages/gl4/html/textureLod.xhtml
+            vec3 Li = textureLod(inFace, uv, mipLevel).rgb;
 
-                prefiltered_color += Li * NdotL; // radiance from inFace
-                total_weight += NdotL; // samples with less influence on the final result (for small NdotL) contribute less to the final weight
+            prefiltered_color += Li * NdotL; // radiance from inFace
+            total_weight += NdotL; // samples with less influence on the final result (for small NdotL) contribute less to the final weight
         }
     }
 
