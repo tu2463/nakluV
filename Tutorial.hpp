@@ -73,9 +73,10 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set2_TEXTURE;
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
-		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE;
-		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // prefiltered GGX specular mipmap
+		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE; // A2-normal
+		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // A2-pbr prefiltered GGX specular mipmap
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
+		VkDescriptorSetLayout set8_Lights = VK_NULL_HANDLE; // A3-materials
 
 		// types for descriptors:
 		struct World {
@@ -110,6 +111,36 @@ struct Tutorial : RTG::Application {
 			std::vector<float> floats;
 			int face_width, face_height;
 		};
+
+		struct LightData {
+			// a vec3 has a base alignment of 4*4bytes; The aligned byte offset of a variable must be equal to a multiple of its base alignment - Credit: https://learnopengl.com/Advanced-OpenGL/Advanced-GLSL
+			
+			// the first 16 bytes:
+			float position[3]; // 3 bytes
+			int32_t type; // 1 byte; 0 = sun, 1 = sphere, 2 = spot //vv use int32_t, not int, because we want exact size for GPU buffer, but the size of int depends on platform implementation
+;
+			// 2nd 16 bytes:
+			float tint[3];
+			float fov; // spot
+
+			// 3rd 16 bytes:
+			float direction[3];
+			float blend; // spot
+
+			// 4th 16 bytes:
+			// sun:
+			float angle;
+			float strength;
+
+			// sphere & spot:
+			float radius;
+			float power;
+
+			// 5th 16 bytes:
+			float limit = std::numeric_limits<float>::infinity(); // optional, will be infinity if not specified
+			float pad[3];
+		};
+		static_assert(sizeof(LightData) == 16*5 );
 
 		// push constants
 		struct Push {
@@ -161,6 +192,11 @@ struct Tutorial : RTG::Application {
 		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Transforms; // device-local
 		VkDescriptorSet Transforms_descriptors; // references Transforms, the descriptor set
+
+		// Light may change per frame, so these buffers need to be in workspace.
+		Helpers::AllocatedBuffer Lights_src; // host coherent; mapped
+		Helpers::AllocatedBuffer Lights; // device-local
+		VkDescriptorSet Lights_descriptors; // references Lights, the descriptor set
 	};
 	std::vector< Workspace > workspaces;
 
@@ -326,7 +362,7 @@ struct Tutorial : RTG::Application {
 		S72::Light *light; // reference to the light data for this object, which includes shadow, type, tint
 		mat4 WORLD_FROM_LOCAL;
 	};
-	std::vector < Light > light_instances;
+	std::vector < Light > light_instances; // at every frame, will transfer Light to LightData and pass to frag shader when creating SSBO
 
 	// -- objects --
 	std::vector< LinesPipeline::Vertex > lines_vertices;
