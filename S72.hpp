@@ -76,6 +76,7 @@ struct S72 {
         Camera *camera = nullptr;
         Environment *environment = nullptr;
         Light *light = nullptr;
+        Cloud *cloud = nullptr;
     };
     std::unordered_map< std::string, Node> nodes;
 
@@ -377,4 +378,23 @@ struct S72 {
 		std::variant< Sun, Sphere, Spot > source;
 	};
     std::unordered_map< std::string, Light> lights;
+
+    struct Cloud {
+        std::string name;
+        std::string src;
+
+        // VDB data
+        struct GridData
+        {   
+            // e.g file_bbox_max: [511, 63, 511] file_bbox_min: [0, 0, 0]
+            int voxels_x = 0, voxels_y = 0, voxels_z = 0;
+            std::vector<float> values; // flat [z][y][x] row-major
+        };
+        GridData dimensional_profile;
+        GridData detail_type;
+        GridData density_scale;
+    };
+    std::unordered_map<std::string, Cloud> clouds;
+
+    // void process_clouds(); // load VDB files
 };
