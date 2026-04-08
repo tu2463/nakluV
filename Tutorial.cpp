@@ -264,7 +264,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.pSetLayouts = &objects_pipeline.set1_TransformsAndLights,
 			};
 
-			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.Transforms_descriptors) ); // NOTE: we will fill in this descriptor set in render when buffers are [re-]allocated
+			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.TransformsLights_descriptors) ); // NOTE: we will fill in this descriptor set in render when buffers are [re-]allocated
 		}
 
 		// descriptor write for World and Camera:
@@ -1182,7 +1182,13 @@ Tutorial::~Tutorial() {
 		if (workspace.Transforms_src.handle != VK_NULL_HANDLE) {
 			rtg.helpers.destroy_buffer(std::move(workspace.Transforms_src));
 		}
-		// Transforms_descriptors freed when pool is destroyed
+		if (workspace.Lights.handle != VK_NULL_HANDLE)  {
+			rtg.helpers.destroy_buffer(std::move(workspace.Lights));
+		}
+		if (workspace.Lights_src.handle != VK_NULL_HANDLE) {
+			rtg.helpers.destroy_buffer(std::move(workspace.Lights_src));
+		}
+		// TransformsLights_descriptors freed when pool is destroyed
 	}
 	workspaces.clear();
 
@@ -1506,84 +1512,209 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 	}
 
 	// object_instances.clear(); // used for CPU bottleneck testing;
-	if (!object_instances.empty()) { // upload object transforms:
-		//[re-]allocate object buffers if needed:
-		size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
-		if (workspace.Transforms_src.handle == VK_NULL_HANDLE || workspace.Transforms_src.size < needed_bytes) { // if the source buffer is missing or too small
-			//round to next multiple of 4k to avoid re-allocating continuously if vertex count grows slowly
-			size_t new_bytes = ((needed_bytes + 4096) / 4096) * 4096; 
-			if (workspace.Transforms_src.handle) {
-				rtg.helpers.destroy_buffer(std::move(workspace.Transforms_src));
+	if (!object_instances.empty()) {
+		{ // upload object transforms
+			//[re-]allocate object buffers if needed:
+			size_t needed_bytes = object_instances.size() * sizeof(object_instances[0]);
+			if (workspace.Transforms_src.handle == VK_NULL_HANDLE || workspace.Transforms_src.size < needed_bytes) { // if the source buffer is missing or too small
+				size_t new_bytes = ((needed_bytes + 4096) / 4096) * 4096; //round to next multiple of 4k to avoid re-allocating continuously if vertex count grows slowly
+				if (workspace.Transforms_src.handle) {
+					rtg.helpers.destroy_buffer(std::move(workspace.Transforms_src));
+				}
+				if (workspace.Transforms.handle) {
+					rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+				}
+
+				workspace.Transforms_src = rtg.helpers.create_buffer(
+					new_bytes, 
+					VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // /going to have GPU copy from this memory
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (the memory can be mapped from the CPU side), coherent (no special sync needed) (the memory doesn't require special flush operations to make host writes available)
+					Helpers::Mapped // get a pointer to the memory
+				);
+				workspace.Transforms = rtg.helpers.create_buffer(
+					new_bytes,
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. the target if memory copy
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+					Helpers::Unmapped // don't get a pointer to memory
+				);
+
+				// update the descriptor set:
+				// Tells Vulkan "the Transforms shader binding should point to this specific buffer."
+				// It connects your GPU buffer to the shader's descriptor. 
+				// Describe the buffer:
+				VkDescriptorBufferInfo Transforms_info{ 
+					.buffer = workspace.Transforms.handle, // which buffer
+					.offset = 0, // start at beginning
+					.range = workspace.Transforms.size, // use whole buffer
+				};
+
+				// describe the write operation:
+				std::array< VkWriteDescriptorSet, 1 > writes{
+					VkWriteDescriptorSet{
+						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  
+						.dstSet = workspace.TransformsLights_descriptors, // which descriptor set to update  
+						.dstBinding = 0, // binding 0 in that set
+						.dstArrayElement = 0, // first element (if it were an array)
+						.descriptorCount = 1,  // updating 1 descriptor
+						.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+						.pBufferInfo = &Transforms_info, 
+					},
+				};
+
+				// execute the update (update includes all operations above, like the object_instances, etc.)
+				vkUpdateDescriptorSets( 
+					rtg.device,
+					uint32_t(writes.size()), writes.data(), // descriptorWrites count, data
+					0, nullptr // descriptorCopies count, data
+				);
+
+				std::cout << "Re-allocated object buffers to " << new_bytes << " bytes." << std::endl;
 			}
-			if (workspace.Transforms.handle) {
-				rtg.helpers.destroy_buffer(std::move(workspace.Transforms));
+
+		assert(workspace.Transforms_src.size == workspace.Transforms.size);
+		assert(workspace.Transforms_src.size >= needed_bytes);
+
+			{ //copy transforms into Transforms_src: use the CPU to copy from the transforms to the workspace.Transforms_src staging buffer
+				assert(workspace.Transforms_src.allocation.mapped);
+				ObjectsPipeline::Transform *out = reinterpret_cast< ObjectsPipeline::Transform* >(workspace.Transforms_src.allocation.data()); // struct aliasing violation, but it doesn't matter
+				for (ObjectInstance const &inst : object_instances) {
+					*out = inst.transform;
+					++out;
+				}
 			}
-
-			workspace.Transforms_src = rtg.helpers.create_buffer(
-				new_bytes, 
-				VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // /going to have GPU copy from this memory
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (the memory can be mapped from the CPU side), coherent (no special sync needed) (the memory doesn't require special flush operations to make host writes available)
-				Helpers::Mapped // get a pointer to the memory
-			);
-			workspace.Transforms = rtg.helpers.create_buffer(
-				new_bytes,
-				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. the target if memory copy
-				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
-				Helpers::Unmapped // don't get a pointer to memory
-			);
-
-			// update the descriptor set:
-			// Tells Vulkan "the Transforms shader binding should point to this specific buffer."
-			// It connects your GPU buffer to the shader's descriptor. 
-			// Describe the buffer:
-			VkDescriptorBufferInfo Transforms_info{ 
-				.buffer = workspace.Transforms.handle, // which buffer
-				.offset = 0, // start at beginning
-				.range = workspace.Transforms.size, // use whole buffer
+			// device-side copy from Transforms_src -> Transforms:
+			// record a command to have the GPU copy the data from the staging buffer to the workspace.lines_vertices buffer.
+			VkBufferCopy copy_region{
+				.srcOffset = 0,
+				.dstOffset = 0,
+				.size = needed_bytes,
 			};
-
-			// describe the write operation:
-			std::array< VkWriteDescriptorSet, 1 > writes{
-				VkWriteDescriptorSet{
-					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  
-					.dstSet = workspace.Transforms_descriptors, // which descriptor set to update  
-					.dstBinding = 0, // binding 0 in that set
-					.dstArrayElement = 0, // first element (if it were an array)
-					.descriptorCount = 1,  // updating 1 descriptor
-					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-					.pBufferInfo = &Transforms_info, 
-				},
-			};
-
-			// execute the update (update includes all operations above, like the object_instances, etc.)
-			vkUpdateDescriptorSets( 
-				rtg.device,
-				uint32_t(writes.size()), writes.data(), // descriptorWrites count, data
-				0, nullptr // descriptorCopies count, data
-			);
-
-			std::cout << "Re-allocated object buffers to " << new_bytes << " bytes." << std::endl;
+			vkCmdCopyBuffer(workspace.command_buffer, workspace.Transforms_src.handle, workspace.Transforms.handle, 1, &copy_region);
 		}
 
-		assert(workspace.Transforms.size == workspace.Transforms.size);
-		assert(workspace.Transforms.size >= needed_bytes);
+		{ // upload lights
+			//[re-]allocate buffers if needed:
+			size_t needed_bytes = light_instances.size() * sizeof(ObjectsPipeline::LightData);
+			if (workspace.Lights_src.handle == VK_NULL_HANDLE || workspace.Lights_src.size < needed_bytes) { // if the source buffer is missing or too small
+				size_t new_bytes = ((needed_bytes + 4096) / 4096) * 4096; //round to next multiple of 4k to avoid re-allocating continuously if vertex count grows slowly
+				if (workspace.Lights_src.handle) {
+					rtg.helpers.destroy_buffer(std::move(workspace.Lights_src));
+				}
+				if (workspace.Lights.handle) {
+					rtg.helpers.destroy_buffer(std::move(workspace.Lights));
+				}
 
-		{ //copy transforms into Transforms_src: use the CPU to copy from the transforms to the workspace.Transforms_src staging buffer
-			assert(workspace.Transforms_src.allocation.mapped);
-			ObjectsPipeline::Transform *out = reinterpret_cast< ObjectsPipeline::Transform* >(workspace.Transforms_src.allocation.data()); // struct aliasing violation, but it doesn't matter
-			for (ObjectInstance const &inst : object_instances) {
-				*out = inst.transform;
-				++out;
+				workspace.Lights_src = rtg.helpers.create_buffer(
+					new_bytes, 
+					VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // /going to have GPU copy from this memory
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (the memory can be mapped from the CPU side), coherent (no special sync needed) (the memory doesn't require special flush operations to make host writes available)
+					Helpers::Mapped // get a pointer to the memory
+				);
+				workspace.Lights = rtg.helpers.create_buffer(
+					new_bytes,
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, // going to use as vertex buffer, also going to have GPU into this memory i.e. the target if memory copy
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU-local memory
+					Helpers::Unmapped // don't get a pointer to memory
+				);
+
+				// update the descriptor set: Tells Vulkan "the Lights shader binding should point to this specific buffer."
+				// It connects your GPU buffer to the shader's descriptor. 
+				// Describe the buffer:
+				VkDescriptorBufferInfo Lights_info{ 
+					.buffer = workspace.Lights.handle, // which buffer
+					.offset = 0, // start at beginning
+					.range = workspace.Lights.size, // use whole buffer
+				};
+
+				// describe the write operation:
+				std::array< VkWriteDescriptorSet, 1 > writes{
+					VkWriteDescriptorSet{
+						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  
+						.dstSet = workspace.TransformsLights_descriptors, // which descriptor set to update  
+						.dstBinding = 1, // binding 1 in TransformsLights_descriptors, 0 is object transforms
+						.dstArrayElement = 0, // first element (if it were an array)
+						.descriptorCount = 1,  // updating 1 descriptor
+						.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+						.pBufferInfo = &Lights_info, 
+					},
+				};
+
+				// execute the update (update includes all operations above, like the object_instances, etc.)
+				vkUpdateDescriptorSets( 
+					rtg.device,
+					uint32_t(writes.size()), writes.data(), // descriptorWrites count, data
+					0, nullptr // descriptorCopies count, data
+				);
+
+				std::cout << "Re-allocated object buffers to " << new_bytes << " bytes." << std::endl;
 			}
+
+			assert(workspace.Lights_src.size == workspace.Lights.size);
+			assert(workspace.Lights_src.size >= needed_bytes);
+
+			{ //copy Lights into Lights_src: use the CPU to copy from the Lights to the workspace.Lights_src staging buffer
+				// Populate Lights_src (CPU side)
+				assert(workspace.Lights_src.allocation.mapped); // make sure that we have a CPU pointer to the buffer memory already
+				ObjectsPipeline::LightData *out = reinterpret_cast< ObjectsPipeline::LightData* >(workspace.Lights_src.allocation.data()); // convert the memory address to Transform*, so that we can write into it using the Transform's size; struct aliasing violation, but it doesn't matter
+				for (Light const &inst : light_instances) {
+					// world-space position: 
+					/* mat4 is column-major
+					             col0  col1  col2  col3                                                                                                                          
+						row 0  [ [0]   [4]   [8]   [12] ]                                                                                                                        
+						row 1  [ [1]   [5]   [9]   [13] ]                                                                                                                        
+						row 2  [ [2]   [6]   [10]  [14] ]                                                                                                                        
+						row 3  [ [3]   [7]   [11]  [15] ]  
+					so mat[col=3][row=0] -> mat[3*4+0]
+					*/
+					out->position[0] = inst.WORLD_FROM_LOCAL[3 * 4 + 0]; //A3-materials-TODO review math
+					out->position[1] = inst.WORLD_FROM_LOCAL[3 * 4 + 1];
+					out->position[2] = inst.WORLD_FROM_LOCAL[3 * 4 + 2];
+
+					// world-space forward direction: //A3-materials-TODO review math
+					// lights are "pointing along the local $-z$ axis" (by S72 spec), so forward = (0,0,-1)
+					out->direction[0] = -inst.WORLD_FROM_LOCAL[2 * 4 + 0];
+					out->direction[1] = -inst.WORLD_FROM_LOCAL[2 * 4 + 1];
+					out->direction[2] = -inst.WORLD_FROM_LOCAL[2 * 4 + 2];
+					
+					out->tint[0] = inst.light->tint.r;
+					out->tint[1] = inst.light->tint.g;
+					out->tint[2] = inst.light->tint.b;
+					// out->shadow = inst.light->shadow; // A3-materials-TODO: need to add shadow to struct and here
+
+					if (std::holds_alternative<S72::Light::Sun>(inst.light->source)) { // returns true/false checks if a std::variant currently holds a specific alternative type
+						out->type = ObjectsPipeline::LightType::Sun;
+						auto const &sun = std::get<S72::Light::Sun>(inst.light->source); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
+						out->angle = sun.angle;
+						out->strength = sun.strength;
+					} else if (std::holds_alternative<S72::Light::Sphere>(inst.light->source)) {
+						out->type = ObjectsPipeline::LightType::Sphere;
+						auto const &sphere = std::get<S72::Light::Sphere>(inst.light->source); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
+						out->radius = sphere.radius;
+						out->power = sphere.power;
+						out->limit = sphere.limit;
+					} else if (std::holds_alternative<S72::Light::Spot>(inst.light->source)) {
+						out->type = ObjectsPipeline::LightType::Spot;
+						auto const &spot = std::get<S72::Light::Spot>(inst.light->source); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
+						out->radius = spot.radius;
+						out->power = spot.power;
+						out->limit = spot.limit;
+						out->fov = spot.fov;
+						out->blend = spot.blend;
+					}
+					
+					++out; // move the pointer to the next Transform-sized chunk of memory
+				}
+			}
+
+			// device-side copy from Lights_src (CPU)-> Lights (GPU)
+			// record a command to have the GPU copy the data from the staging buffer to the workspace.lines_vertices buffer.
+			VkBufferCopy copy_region{
+				.srcOffset = 0,
+				.dstOffset = 0,
+				.size = needed_bytes,
+			};
+			vkCmdCopyBuffer(workspace.command_buffer, workspace.Lights_src.handle, workspace.Lights.handle, 1, &copy_region);
 		}
-		// device-side copy from lines_vertices_src -> lines_vertices:
-		// record a command to have the GPU copy the data from the staging buffer to the workspace.lines_vertices buffer.
-		VkBufferCopy copy_region{
-			.srcOffset = 0,
-			.dstOffset = 0,
-			.size = needed_bytes,
-		};
-		vkCmdCopyBuffer(workspace.command_buffer, workspace.Transforms_src.handle, workspace.Transforms.handle, 1, &copy_region);
 	}
 
 	{ // memory barrier to make sure copies compelte before rendering happens
@@ -1739,7 +1870,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		{ // bind World and Transforms descriptor set:
 			std::array< VkDescriptorSet, 2 > descriptor_sets{
 				workspace.World_descriptors, // 0: World
-				workspace.Transforms_descriptors, // 1: Transforms
+				workspace.TransformsLights_descriptors, // 1: Transforms
 			};
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer, // command buffer

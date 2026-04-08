@@ -111,12 +111,18 @@ struct Tutorial : RTG::Application {
 			int face_width, face_height;
 		};
 
+		enum class LightType : int32_t { //vv use int32_t, not int, because we want exact size for GPU buffer, but the size of int depends on platform implementation
+			Sun = 0,
+			Sphere = 1,
+			Spot = 2,
+		};
+
 		struct LightData {
 			// a vec3 has a base alignment of 4*4bytes; The aligned byte offset of a variable must be equal to a multiple of its base alignment - Credit: https://learnopengl.com/Advanced-OpenGL/Advanced-GLSL
 			
 			// the first 16 bytes:
 			float position[3]; // 3 bytes
-			int32_t type; // 1 byte; 0 = sun, 1 = sphere, 2 = spot //vv use int32_t, not int, because we want exact size for GPU buffer, but the size of int depends on platform implementation
+			LightType type; // 1 byte; 0 = sun, 1 = sphere, 2 = spot
 ;
 			// 2nd 16 bytes:
 			float tint[3];
@@ -190,7 +196,7 @@ struct Tutorial : RTG::Application {
 		// location for ObjectsPipeline::Transforms data: (streamed to GPU per-frame)
 		Helpers::AllocatedBuffer Transforms_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Transforms; // device-local
-		VkDescriptorSet Transforms_descriptors; // references Transforms (binding 0) and Lights (binding 1)
+		VkDescriptorSet TransformsLights_descriptors; // references Transforms (binding 0) and Lights (binding 1)
 
 		// Light may change per frame, so these buffers need to be in workspace.
 		Helpers::AllocatedBuffer Lights_src; // host coherent; mapped

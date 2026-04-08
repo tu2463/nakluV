@@ -336,15 +336,37 @@ struct S72 {
 		uint32_t shadow = 0; //optional, if not set will be '0'
 
 		//light has exactly one of these sources:
+
+        /*
+        A `"sun"` light is a distant directional light pointing along the local $-z$ axis. Properties:
+        - `"angle"` (required) -- every surface element sees the sun light as coming from a disc of this angular diameter. (`"angle"` is in radians and will be at most $\pi$. )
+        - `"strength"` (required) -- energy per area emitted by the light, in watts per square meter. (Note: multiply by the `"tint"` of the light to get actual per-primary energy.)
+        */
 		struct Sun {
 			float angle;
 			float strength;
 		};
+
+        /*
+        A `"sphere"` light is a spherical area light. Points on the surface emit light uniformly in all visible directions. Properties:
+        - `"radius"` (required) -- the radius of the sphere in local scene units.
+        - `"power"` (required) -- the total power emitted by the light, in watts. (Note: multiply by the `"tint"` of the light to get actual per-primary power.)
+        - `"limit"` (optional) -- distance at which the light's falloff is driven to zero (see equation below).
+        */
 		struct Sphere {
 			float radius;
 			float power;
 			float limit = std::numeric_limits< float >::infinity(); //optional, will be infinity if not specified
 		};
+
+        /*
+        A `"spot"` light is a spherical area light which emits light only in a cone around its $-z$ axis. Properties:
+        - `"radius"` (required) -- the radius of the sphere in local scene units.
+        - `"power"` (required) -- the total power that would be emitted by the light if it were a `"sphere"` light, in watts. (Note: multiply by the `"tint"` of the light to get actual per-primary power.)
+        - `"limit"` (optional) -- distance at which the light's falloff is driven to zero (see equation below).
+        - `"fov"` (required) -- field of view of the light's cone, in radians.
+        - `"blend"` (required) -- factor controlling smooth falloff at edge of light cone.
+        */
 		struct Spot {
 			float radius;
 			float power;
