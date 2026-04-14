@@ -8,6 +8,18 @@ layout(set=0, binding=0, std140) uniform World {
     vec3 EYE;
 };
 
+struct LightData {
+    vec3 position; int type;
+    vec3 tint; float fov;
+    vec3 direction; float blend;
+    float angle; float strength; float radius; float power;
+    float limit;
+};
+
+layout(set=1, binding=1, std140) readonly buffer Lights {
+    LightData LIGHTS[];
+};
+
 layout(set=2, binding=0) uniform sampler2D TEXTURE;
 layout(set=3, binding=0) uniform samplerCube cubeMap; // radiance cubemap (mirror / environment materials); binding=0 was specified at VkDescriptorSetLayoutBinding
 layout(set=4, binding=0) uniform samplerCube lambertianCubeMap; // prefiltered irradiance cubemap (X.lambertian.png, lambertian material)
@@ -21,6 +33,7 @@ layout(push_constant) uniform Push {
     uint tone_map;
     float roughness; // A2-pbr, [0, 1]
     float metalness; // [0, 1]
+    int lights_count; // A3-materials, count of direct lights (sun, sphere, spot)
 };
 
 layout(location=0) in vec3 position;
@@ -30,6 +43,8 @@ layout(location=3) in vec3 tangent;
 layout(location=4) in vec3 bitangent;
 
 layout(location=0) out vec4 outColor;
+
+const float PI = 3.14159265359;
 
 // Credit: 
 // https://bruop.github.io/tonemapping/
@@ -56,6 +71,65 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     // (1 - cosθ)^5：控制从 F0 到 1 的过渡曲线
     // the max() prevents F from going below F0
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// Returns irradiance from one direct light. 
+vec3 direct_lambertian(LightData light, vec3 n, vec3 albedo) { // Credit: Lights lecture slide
+    float irradiance;
+    vec3 L;
+    float sinThetaBy2;
+
+    if (light.type == 0) { // sun 
+        sinThetaBy2 = sin(light.angle / 2.0); // light.angle is angle of patch
+        L = normalize(-light.direction);
+        irradiance = light.strength;
+    } else { // sphere(1) or spot(2)
+        vec3 L_vec = light.position - position;
+        float d = length(L_vec);
+        sinThetaBy2 = light.radius / d;
+        L = normalize(L_vec);
+        irradiance = light.power / (4.0 * PI * max(d, light.radius) * max(d, light.radius)); // per_area energy recevied at distance d
+
+        if (light.type == 2) { // spot i.e. sphere light with additional attenuation for cone
+            /* Credit: S72 spec
+            A point within $(fov * (1-blend))/2$ radians of a *spot*'s $-z$ axis is fully illuminated by that *spot* (i.e., is illuminated as if by a sphere light with the same parameters).
+            A point outside $fov/2$ radians of a *spot*'s $-z$ axis is not illuminated by that *spot*.
+            A point between $(fov * (1-blend))/2$ and $fov/2$ radians of a *spot*'s $-z$ axis is lit with a linear (w.r.t. angle) blend between full and no illumination.
+            */
+            float cosTheta = dot(-L, normalize(light.direction));
+            float angle = acos(cosTheta); // angle in radians
+
+            // the two half angles of the cone:
+            float inner_half = light.fov * (1.0 - light.blend) / 2.0;
+            float outer_half = light.fov / 2.0;
+
+            float blend_t = clamp((angle - inner_half) / (outer_half - inner_half), 0.0, 1.0); // angle=inner_half => 0; angle=outer_half => =1
+            float cone_attenuation = 1.0 - blend_t; // angle=inner_half => 1; angle=outer_half => 0
+            irradiance *= cone_attenuation; // angle close to inner => not attenutated much; angle close to outer (or > outer) => attenutaed by a lot
+        }
+    }
+
+    float NdotL = dot(n, L); // we use it to check which side of the surface are we on, need the sign, so should not clamp it to 0-1
+    vec3 e_diffuse;
+    if (NdotL >= sinThetaBy2) { // above horizon
+        e_diffuse = NdotL * (albedo / PI) * irradiance;
+
+        // For diffuse lighting, use the observation that an above-the-horizon sphere light can be
+        // replaced with a point light with the same power located at the center of the original light.
+    } else if (NdotL <= -sinThetaBy2) { // below horizon
+        e_diffuse = vec3(0.0);
+    } else { // crossing horizon
+        float lower_bound = -sinThetaBy2;
+        float upper_bound = sinThetaBy2;
+        float t = (NdotL - lower_bound) / (upper_bound - lower_bound); // map NdotL from [-sinThetaBy2, sinThetaBy2] to [0,1]. t=0 = bottom boundary, t=1 = top boundary, t=0.5 = at horizon.
+        float t_smooth = t * t * (3.0 - 2.0 * t); // cubic; at^3+bt^2+ct+d => -2t^3 + 3t^2 = t^2(-2t + 3)
+        e_diffuse = t_smooth * sinThetaBy2 * (albedo / PI) * irradiance;
+    }
+    return light.tint * e_diffuse;
+}
+
+vec3 direct_pbr(LightData light, vec3 n) {
+    return vec3(0.0);
 }
 
 void main() {
@@ -109,10 +183,20 @@ void main() {
         vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y); // combine scale+bias with the prefiltered env color (left portion of the IBL reflectance equation and re-construct the approximated integral result as specular)
 
         hdr = (kD * diffuse + specular) * pow(2.0, float(exposure)); // combine diffuse + specular + exposure
+        /*
+        // A3-materials: add support for direct lights
+        vec3 direct = vec3(0.0);
+        for (uint i = 0; i < LIHGTS.length; i++) {
+            direct += direct_pbr();
+        }
+        hdr += direct * pow(2.0, float(exposure));*/
     } else {
         vec3 mat_light;
         if (material_type == 1) { // lambertian: sample the prefiltered irradiance cubemap at n; stores (incoming radiance at n)/PI, multiplying by albedo gives Lambertian output
             mat_light = texture(lambertianCubeMap, n).rgb;
+            for (int i = 0; i < lights_count; i++) {
+                mat_light += direct_lambertian(LIGHTS[i], n, albedo); // A3-materials: adding contributions from direct lights
+            }
         } else if (material_type == 2) { // mirror
             vec3 I = normalize(position - EYE);
             vec3 R = reflect(I, normalize(n));
@@ -120,8 +204,8 @@ void main() {
         } else if (material_type == 3) {// environmental
             mat_light = texture(cubeMap, n).rgb; // sample the cubemap in the direction of normal; texture() returns vec4 (RGBA), but alpha is not needed for calculating energy, so use .rgb to extract the vec3 (RGB)
         }
-        vec3 e = mat_light + SUN_ENERGY * max(0.0, dot(n, SUN_DIRECTION));
-        hdr = (e * albedo) * pow(2.0, float(exposure));
+        // vec3 e = mat_light + SUN_ENERGY * max(0.0, dot(n, SUN_DIRECTION)); // before A3-materials, treat it as point light, no radius, does not handle near horizon
+        hdr = (mat_light * albedo) * pow(2.0, float(exposure));
     }
 
     // A2-tone mapping: the process of converting HDR light values into LDR values that a display can show.

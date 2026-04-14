@@ -78,7 +78,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
 
 		// types for descriptors:
-		struct World {
+		struct World { // correspond to layout(set=0, binding=0, std140) uniform World in frag shader
 			struct { float x, y, z, padding_; } SKY_DIRECTION; // padding is require by the std140 layout, which aligns vec3s on 4-element boundaries; what is std140 //??
 			struct { float r, g, b, padding_; } SKY_ENERGY;
 			struct { float x, y, z, padding_; } SUN_DIRECTION;
@@ -87,7 +87,7 @@ struct Tutorial : RTG::Application {
 		};
 		static_assert(sizeof(World) == 4*4 + 4*4 + 4*4 + 4*4 + 4*4, "World is the expected size.");
 
-		struct Transform {
+		struct Transform { // passed to vert shader via set1; correspond to layout(set=1, binding=0) in vert shader
 			mat4 CLIP_FROM_LOCAL; // from object's local space to clip space, for gl_Position
 			mat4 WORLD_FROM_LOCAL; // from local positions to world space, for positions (lighting calculations); Where the object IS in the world (position + orientation)
 			mat4 WORLD_FROM_LOCAL_NORMAL; // for normals = transpose(inverse(WORLD_FROM_LOCAL))
@@ -154,6 +154,7 @@ struct Tutorial : RTG::Application {
 			ToneMap tone_map_push = ToneMap::Linear;
 			float roughness = 0.5f; // A2-pbr
 			float metalness = 0.0f;
+			int lights_count = 0; // A3-materials
 		};
 		ToneMap tone_map = ToneMap::Linear;
 
@@ -248,7 +249,7 @@ struct Tutorial : RTG::Application {
 	- minFilter = LINEAR + mipmapMode = LINEAR for smooth interpolation between mip levels (between roughness values).
 	- addressMode needs to be appropriate for a cubemap (typically CLAMP_TO_EDGE to avoid seams at cube edges).
 	*/
-	VkSampler ggx_sampler;
+	VkSampler ggx_sampler = VK_NULL_HANDLE;
 	VkImageView ggx_view = VK_NULL_HANDLE;
 	VkDescriptorSet ggx_descriptors = VK_NULL_HANDLE; // will be allocated from texture_descriptor_pool
 	uint32_t ggx_mip_count = 0;

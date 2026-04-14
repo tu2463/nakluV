@@ -1606,7 +1606,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 				workspace.Lights_src = rtg.helpers.create_buffer(
 					new_bytes, 
-					VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // /going to have GPU copy from this memory
+					VK_BUFFER_USAGE_TRANSFER_SRC_BIT, // going to have GPU copy from this memory
 					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // host-visible memory (the memory can be mapped from the CPU side), coherent (no special sync needed) (the memory doesn't require special flush operations to make host writes available)
 					Helpers::Mapped // get a pointer to the memory
 				);
@@ -1652,7 +1652,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			assert(workspace.Lights_src.size == workspace.Lights.size);
 			assert(workspace.Lights_src.size >= needed_bytes);
 
-			{ //copy Lights into Lights_src: use the CPU to copy from the Lights to the workspace.Lights_src staging buffer
+			{ // copy Lights into Lights_src: use the CPU to copy from the Lights to the workspace.Lights_src staging buffer
 				// Populate Lights_src (CPU side)
 				assert(workspace.Lights_src.allocation.mapped); // make sure that we have a CPU pointer to the buffer memory already
 				ObjectsPipeline::LightData *out = reinterpret_cast< ObjectsPipeline::LightData* >(workspace.Lights_src.allocation.data()); // convert the memory address to Transform*, so that we can write into it using the Transform's size; struct aliasing violation, but it doesn't matter
@@ -1702,7 +1702,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 						out->blend = spot.blend;
 					}
 					
-					++out; // move the pointer to the next Transform-sized chunk of memory
+					++out; // move the pointer to the next ObjectsPipeline::LightData-sized chunk of memory
 				}
 			}
 
@@ -1870,7 +1870,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		{ // bind World and Transforms descriptor set:
 			std::array< VkDescriptorSet, 2 > descriptor_sets{
 				workspace.World_descriptors, // 0: World
-				workspace.TransformsLights_descriptors, // 1: Transforms
+				workspace.TransformsLights_descriptors, // 1: Transforms & Lights
 			};
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer, // command buffer
@@ -1948,6 +1948,7 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 					.tone_map_push = objects_pipeline.tone_map,
 					.roughness = inst.roughness,
 					.metalness = inst.metalness,
+					.lights_count = int(light_instances.size()),
 				};
 				vkCmdPushConstants(workspace.command_buffer, objects_pipeline.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
 			}
