@@ -165,15 +165,15 @@ void main() {
         float HdotV = clamp(dot(H, V), 0.0, 1.0);
 
         // Credit: Bright dots in the pre-filter convolution from https://learnopengl.com/PBR/IBL/Specular-IBL
-        float D   = DistributionGGX(NdotH, roughness);
+        float D = DistributionGGX(NdotH, roughness);
         float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001;
         float resolution = float(inSize.x); // resolution of source cubemap (per face)
-        float saTexel  = 4.0 * PI / (6.0 * resolution * resolution); // how much solid angle one source cubemap texel covers
+        float saTexel = 4.0 * PI / (6.0 * resolution * resolution); // how much solid angle one source cubemap texel covers
         float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 0.0001); // how much solid angle this Monte Carlo sample covers
         // If one sample covers a bigger area than one texel, you should sample a blurrier mip.
         float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(saSample / saTexel);
 
-        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+        vec3 L = normalize(2.0 * dot(V, H) * H - V);
 
         float NdotL = clamp(dot(N, L), 0.0, 1.0);
         if (NdotL > 0.0) {

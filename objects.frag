@@ -73,10 +73,52 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// Returns irradiance from one direct light. 
+// Credit: Direct lighting from https://learnopengl.com/PBR/Lighting
+float DistributionGGX(float NdotH, float Roughness) {
+    float a  = Roughness * Roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    return a2 / denom;
+}
+
+// Credit: https://learnopengl.com/PBR/IBL/Specular-IBL, https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+float GeometrySchlickGGX(float NdotV, float roughness) {
+    float a = roughness;
+    float k = (a * a) / 2.0;
+
+    float nom   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}  
+
+float get_diffuse_irradiance(float NdotL, float sinThetaBy2, float irradiance) {
+    if (NdotL >= sinThetaBy2) { // above horizon
+        return NdotL * irradiance;
+    } else if (NdotL <= -sinThetaBy2) { // below horizon
+        return 0.0;
+    } else { // crossing horizon: cubic smoothstep
+        float t = (NdotL + sinThetaBy2) / (2.0 * sinThetaBy2);
+        float t_smooth = t * t * (3.0 - 2.0 * t);
+        return t_smooth * sinThetaBy2 * irradiance;
+    }
+}
+
+// Returns irradiance from one direct light.
 vec3 direct_lambertian(LightData light, vec3 n, vec3 albedo) { // Credit: Lights lecture slide
     float irradiance;
-    vec3 L;
+    vec3 L; // unit direction from surface towards light
     float sinThetaBy2;
 
     if (light.type == 0) { // sun 
@@ -85,7 +127,7 @@ vec3 direct_lambertian(LightData light, vec3 n, vec3 albedo) { // Credit: Lights
         irradiance = light.strength;
     } else { // sphere(1) or spot(2)
         vec3 L_vec = light.position - position;
-        float d = length(L_vec);
+        float d = length(L_vec); // distance from surface to light center.
         sinThetaBy2 = light.radius / d;
         L = normalize(L_vec);
         irradiance = light.power / (4.0 * PI * max(d, light.radius) * max(d, light.radius)); // per_area energy recevied at distance d
@@ -109,27 +151,67 @@ vec3 direct_lambertian(LightData light, vec3 n, vec3 albedo) { // Credit: Lights
         }
     }
 
-    float NdotL = dot(n, L); // we use it to check which side of the surface are we on, need the sign, so should not clamp it to 0-1
-    vec3 e_diffuse;
-    if (NdotL >= sinThetaBy2) { // above horizon
-        e_diffuse = NdotL * (albedo / PI) * irradiance;
-
-        // For diffuse lighting, use the observation that an above-the-horizon sphere light can be
-        // replaced with a point light with the same power located at the center of the original light.
-    } else if (NdotL <= -sinThetaBy2) { // below horizon
-        e_diffuse = vec3(0.0);
-    } else { // crossing horizon
-        float lower_bound = -sinThetaBy2;
-        float upper_bound = sinThetaBy2;
-        float t = (NdotL - lower_bound) / (upper_bound - lower_bound); // map NdotL from [-sinThetaBy2, sinThetaBy2] to [0,1]. t=0 = bottom boundary, t=1 = top boundary, t=0.5 = at horizon.
-        float t_smooth = t * t * (3.0 - 2.0 * t); // cubic; at^3+bt^2+ct+d => -2t^3 + 3t^2 = t^2(-2t + 3)
-        e_diffuse = t_smooth * sinThetaBy2 * (albedo / PI) * irradiance;
-    }
+    float NdotL = dot(n, L); // signed. we use it to check which side of the surface are we on, need the sign, so should not clamp it to 0-1
+    vec3 e_diffuse = get_diffuse_irradiance(NdotL, sinThetaBy2, irradiance) * (albedo / PI);
     return light.tint * e_diffuse;
 }
 
-vec3 direct_pbr(LightData light, vec3 n) {
-    return vec3(0.0);
+// Returns radiance contribution (diffuse + specular) from one direct light for PBR material.
+vec3 direct_pbr(LightData light, vec3 n, vec3 albedo, vec3 F0) {
+    float irradiance;
+    float sinThetaBy2;
+    vec3 L; // unit direction from surface toward light center
+
+    if (light.type == 0) { // sun
+        L = normalize(-light.direction);
+        sinThetaBy2 = sin(light.angle / 2.0);
+        irradiance = light.strength;
+    } else { // sphere / spot: TODO
+        return vec3(0.0);
+    }
+
+    // -- diffuse: same as direct_lambertian
+    float NdotL_original = dot(n, L);
+    float diffuse_irr = get_diffuse_irradiance(NdotL_original, sinThetaBy2, irradiance);
+
+    // -- specular: Representative point method from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+    vec3 V = normalize(EYE - position); // view direction toward camera
+
+    // find the point with the smallest angle to the reflection ray 
+    // by finding the point with the smallest distance to the ray.
+
+    // sun: Find the direction within the sun disc closest to the reflection ray.
+    vec3 r = reflect(-V, n); // reflection direction
+    vec3 centerToRay = dot(L, r) * r - L;
+    float sourceRadius = sinThetaBy2; // Sun is treated as a sphere with radius = sin(theta/2).
+    vec3 closestPoint = L + centerToRay * clamp(sourceRadius / length(centerToRay), 0.0, 1.0);
+    vec3 L_modified = normalize(closestPoint); // modified light direction
+
+    // GGX BRDF inputs
+    float NdotL = max(dot(n, L_modified), 0.0);
+    float NdotV = max(dot(n, V),       0.0);
+    vec3  H = normalize(V + L_modified);
+    float NdotH = max(dot(n, H), 0.0);
+    float VdotH = max(dot(V, H), 0.0);
+
+    // eq10 from from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf. //??
+    float alpha = roughness * roughness;
+    float distance = 1; // 1 for sun
+    float alpha_prime = clamp(alpha + sourceRadius / (2.0 * distance), 0.0, 1.0);
+    float normalization = (alpha / alpha_prime) * (alpha / alpha_prime); // energy normalization (Karis Eq.14)
+
+    float D = DistributionGGX(NdotH, alpha_prime);
+    float G = GeometrySmith(n, V, L_modified, roughness);
+    vec3 F = FresnelSchlickRoughness(VdotH, F0, roughness);
+
+    vec3 specular_brdf = (D * G * F) / max(4.0 * NdotV * NdotL, 0.0001); // Cook-Torrance, eq2 from from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+    vec3 e_specular    = specular_brdf * normalization * NdotL * irradiance;
+
+    vec3 kS = F; // kS描述在给定视角下有多少光被镜面反射
+    vec3 kD = 1.0 - kS; // 剩余给漫反射
+    kD *= 1.0 - metalness; // Metalness 对 kD 的修正：金属没有漫反射（diffuse)，导体会立刻吸收折射进去的光，不会从内部散射出来。所以metalness = 0 (non-metal) => kD stays the same; =1 (metal) => only specular
+    vec3 e_diffuse  = kD * (albedo / PI) * diffuse_irr;
+    return light.tint * (e_diffuse + e_specular);
 }
 
 void main() {
@@ -183,13 +265,13 @@ void main() {
         vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y); // combine scale+bias with the prefiltered env color (left portion of the IBL reflectance equation and re-construct the approximated integral result as specular)
 
         hdr = (kD * diffuse + specular) * pow(2.0, float(exposure)); // combine diffuse + specular + exposure
-        /*
-        // A3-materials: add support for direct lights
+
+        // A3-materials: add direct light contributions
         vec3 direct = vec3(0.0);
-        for (uint i = 0; i < LIHGTS.length; i++) {
-            direct += direct_pbr();
+        for (int i = 0; i < lights_count; i++) {
+            direct += direct_pbr(LIGHTS[i], n, albedo, F0);
         }
-        hdr += direct * pow(2.0, float(exposure));*/
+        hdr += direct * pow(2.0, float(exposure));
     } else {
         vec3 mat_light;
         if (material_type == 1) { // lambertian: sample the prefiltered irradiance cubemap at n; stores (incoming radiance at n)/PI, multiplying by albedo gives Lambertian output
