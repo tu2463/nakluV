@@ -103,6 +103,43 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     return ggx1 * ggx2;
 }  
 
+struct LightParams {
+    vec3 L; // unit direction from surface toward light
+    float sinThetaBy2;
+    float irradiance;
+};
+
+// Computes L, sinThetaBy2, and irradiance for a light at the current frag pos
+LightParams get_light_params(LightData light) {
+    LightParams light_params;
+    if (light.type == 0) { // sun
+        light_params.sinThetaBy2 = sin(light.angle / 2.0);
+        light_params.L = normalize(-light.direction);
+        light_params.irradiance = light.strength;
+    } else { // sphere(1) or spot(2)
+        vec3 L_vec = light.position - position;
+        float d = length(L_vec);
+        light_params.L = normalize(L_vec);
+        light_params.sinThetaBy2 = light.radius / max(d, light.radius);
+        light_params.irradiance = light.power / (4.0 * PI * max(d, light.radius) * max(d, light.radius));
+
+        if (light.type == 2) { // spot: sphere light with additional attenuation for cone
+            /* Credit: S72 spec
+            A point within $(fov * (1-blend))/2$ radians of a *spot*'s $-z$ axis is fully illuminated by that *spot* (i.e., is illuminated as if by a sphere light with the same parameters).
+            A point outside $fov/2$ radians of a *spot*'s $-z$ axis is not illuminated by that *spot*.
+            A point between $(fov * (1-blend))/2$ and $fov/2$ radians of a *spot*'s $-z$ axis is lit with a linear (w.r.t. angle) blend between full and no illumination.
+            */
+            float cosTheta = dot(-light_params.L, normalize(light.direction));
+            float angle = acos(cosTheta);
+            float inner_half = light.fov * (1.0 - light.blend) / 2.0;
+            float outer_half = light.fov / 2.0;
+            float blend_t = clamp((angle - inner_half) / (outer_half - inner_half), 0.0, 1.0); // angle=inner_half => 0; angle=outer_half => 1
+            light_params.irradiance *= 1.0 - blend_t; // angle=inner_half => 1; angle=outer_half => 0
+        }
+    }
+    return light_params;
+}
+
 float get_diffuse_irradiance(float NdotL, float sinThetaBy2, float irradiance) {
     if (NdotL >= sinThetaBy2) { // above horizon
         return NdotL * irradiance;
@@ -117,58 +154,18 @@ float get_diffuse_irradiance(float NdotL, float sinThetaBy2, float irradiance) {
 
 // Returns irradiance from one direct light.
 vec3 direct_lambertian(LightData light, vec3 n, vec3 albedo) { // Credit: Lights lecture slide
-    float irradiance;
-    vec3 L; // unit direction from surface towards light
-    float sinThetaBy2;
-
-    if (light.type == 0) { // sun 
-        sinThetaBy2 = sin(light.angle / 2.0); // light.angle is angle of patch
-        L = normalize(-light.direction);
-        irradiance = light.strength;
-    } else { // sphere(1) or spot(2)
-        vec3 L_vec = light.position - position;
-        float d = length(L_vec); // distance from surface to light center.
-        sinThetaBy2 = light.radius / d;
-        L = normalize(L_vec);
-        irradiance = light.power / (4.0 * PI * max(d, light.radius) * max(d, light.radius)); // per_area energy recevied at distance d
-
-        if (light.type == 2) { // spot i.e. sphere light with additional attenuation for cone
-            /* Credit: S72 spec
-            A point within $(fov * (1-blend))/2$ radians of a *spot*'s $-z$ axis is fully illuminated by that *spot* (i.e., is illuminated as if by a sphere light with the same parameters).
-            A point outside $fov/2$ radians of a *spot*'s $-z$ axis is not illuminated by that *spot*.
-            A point between $(fov * (1-blend))/2$ and $fov/2$ radians of a *spot*'s $-z$ axis is lit with a linear (w.r.t. angle) blend between full and no illumination.
-            */
-            float cosTheta = dot(-L, normalize(light.direction));
-            float angle = acos(cosTheta); // angle in radians
-
-            // the two half angles of the cone:
-            float inner_half = light.fov * (1.0 - light.blend) / 2.0;
-            float outer_half = light.fov / 2.0;
-
-            float blend_t = clamp((angle - inner_half) / (outer_half - inner_half), 0.0, 1.0); // angle=inner_half => 0; angle=outer_half => =1
-            float cone_attenuation = 1.0 - blend_t; // angle=inner_half => 1; angle=outer_half => 0
-            irradiance *= cone_attenuation; // angle close to inner => not attenutated much; angle close to outer (or > outer) => attenutaed by a lot
-        }
-    }
-
-    float NdotL = dot(n, L); // signed. we use it to check which side of the surface are we on, need the sign, so should not clamp it to 0-1
-    vec3 e_diffuse = get_diffuse_irradiance(NdotL, sinThetaBy2, irradiance) * (albedo / PI);
+    LightParams light_params = get_light_params(light);
+    float NdotL = dot(n, light_params.L); // signed: used to detect which side of the surface we're on
+    vec3 e_diffuse = get_diffuse_irradiance(NdotL, light_params.sinThetaBy2, light_params.irradiance) * (albedo / PI);
     return light.tint * e_diffuse;
 }
 
 // Returns radiance contribution (diffuse + specular) from one direct light for PBR material.
 vec3 direct_pbr(LightData light, vec3 n, vec3 albedo, vec3 F0) {
-    float irradiance;
-    float sinThetaBy2;
-    vec3 L; // unit direction from surface toward light center
-
-    if (light.type == 0) { // sun
-        L = normalize(-light.direction);
-        sinThetaBy2 = sin(light.angle / 2.0);
-        irradiance = light.strength;
-    } else { // sphere / spot: TODO
-        return vec3(0.0);
-    }
+    LightParams light_params = get_light_params(light);
+    vec3 L = light_params.L;
+    float sinThetaBy2 = light_params.sinThetaBy2;
+    float irradiance = light_params.irradiance;
 
     // -- diffuse: same as direct_lambertian
     float NdotL_original = dot(n, L);
