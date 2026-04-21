@@ -123,6 +123,11 @@ LightParams get_light_params(LightData light) {
         light_params.sinThetaBy2 = light.radius / max(d, light.radius);
         light_params.irradiance = light.power / (4.0 * PI * max(d, light.radius) * max(d, light.radius));
 
+        // Falloff. Credit: Lighting Model (eq9) from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+        if (light.limit > 0.0) {
+            light_params.irradiance *= max(0.0, 1.0 - pow(d / light.limit, 4.0));
+        }
+
         if (light.type == 2) { // spot: sphere light with additional attenuation for cone
             /* Credit: S72 spec
             A point within $(fov * (1-blend))/2$ radians of a *spot*'s $-z$ axis is fully illuminated by that *spot* (i.e., is illuminated as if by a sphere light with the same parameters).
