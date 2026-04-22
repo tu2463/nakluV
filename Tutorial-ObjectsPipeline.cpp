@@ -35,8 +35,8 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set0_World) );
 	}
 
-	{ // set1_TransformsAndLights: binding 0 = Transforms SSBO (vertex), binding 1 = Lights SSBO (fragment)
-		std::array< VkDescriptorSetLayoutBinding, 2 > bindings{
+	{ // set1_TransformsLightsShadows: binding 0 = Transforms SSBO (vertex), binding 1 = Lights SSBO (fragment), binding 2 = shadow maps array (fragment)
+		std::array< VkDescriptorSetLayoutBinding, 3 > bindings{
 			VkDescriptorSetLayoutBinding{
 				.binding = 0,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -49,6 +49,12 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 			},
+			VkDescriptorSetLayoutBinding{
+				.binding = 2,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1, // one sampler2DArrayShadow; layers = shadow_count (set at image creation)
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+			},
 		};
 
 		VkDescriptorSetLayoutCreateInfo create_info{
@@ -57,7 +63,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.pBindings = bindings.data(),
 		};
 
-		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_TransformsAndLights) );
+		VK( vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &set1_TransformsLightsShadows) );
 	}
 
 	{ // the set2_TEXTURE layout has a single descriptor for a sampler2D used in the fragment shader:
@@ -179,7 +185,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 
 		std::array< VkDescriptorSetLayout, 8 > layouts{
 			set0_World,
-			set1_TransformsAndLights,
+			set1_TransformsLightsShadows,
 			set2_TEXTURE,
 			set3_CubeMap,
 			set4_LambertianCubeMap,
@@ -317,9 +323,9 @@ void Tutorial::ObjectsPipeline::destroy(RTG &rtg) {
 		set0_World = VK_NULL_HANDLE;
 	}
 
-	if (set1_TransformsAndLights != VK_NULL_HANDLE) {
-		vkDestroyDescriptorSetLayout(rtg.device, set1_TransformsAndLights, nullptr);
-		set1_TransformsAndLights = VK_NULL_HANDLE;
+	if (set1_TransformsLightsShadows != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, set1_TransformsLightsShadows, nullptr);
+		set1_TransformsLightsShadows = VK_NULL_HANDLE;
 	}
 
 	if (set2_TEXTURE != VK_NULL_HANDLE) {

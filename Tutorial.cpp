@@ -170,14 +170,18 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	{ // create descriptor tool:
 		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
 
-		std::array< VkDescriptorPoolSize, 2 > pool_sizes{
+		std::array< VkDescriptorPoolSize, 3 > pool_sizes{
 			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 				.descriptorCount = 2 * per_workspace, // 1 descriptor per set, 2 set per workspace (world, camera)
 			},
-			VkDescriptorPoolSize{ // uniform buffer descriptors
+			VkDescriptorPoolSize{ // storage buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 2 * per_workspace, // one descriptor per set, two set (Transforms + Lights) per workspace
+			},
+			VkDescriptorPoolSize{ // combined image sampler for shadow maps (set1 binding 2, one per workspace)
+				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1 * per_workspace,
 			},
 		};
 
@@ -190,6 +194,39 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		};
 
 		VK( vkCreateDescriptorPool(rtg.device, &create_info, nullptr, &descriptor_pool) );
+	}
+
+	{ // A3-shadows: count shadow-casting spot lights and create comparison sampler
+		for (auto const &[name, light] : s72.lights) {
+			if (std::holds_alternative<S72::Light::Spot>(light.source) && light.shadow > 0) {
+				shadow_count++;
+				shadow_resolution = std::max(shadow_resolution, light.shadow);
+			}
+		}
+		// if no shadow lights, use a minimal 1x1 image so descriptors are always valid
+		if (shadow_count == 0) shadow_resolution = 1;
+
+		VkSamplerCreateInfo sampler_info{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR, // Use linear filtering for magnification & minification (smoother)
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+
+			/* A3-shadows: MoltenVK (macOS) does not support, so need to set to VK_FALSE. Depth comparison is done manually in the fragment shader
+			E: vkUpdateDescriptorSets(): pDescriptorWrites[0] (portability error): sampler comparison not available.
+			The Vulkan spec states: If the VK_KHR_portability_subset extension is enabled, and VkPhysicalDevicePortabilitySubsetFeaturesKHR::mutableComparisonSamplers is VK_FALSE, then sampler must have been created with VkSamplerCreateInfo::compareEnable set to VK_FALSE (https://vulkan.lunarg.com/doc/view/1.4.335.1/mac/antora/spec/latest/chapters/descriptorsets.html#VUID-VkDescriptorImageInfo-mutableComparisonSamplers-04450)
+			*/
+			.compareEnable = VK_FALSE,
+			.minLod = 0.0f,
+			.maxLod = 0.0f, // Clamps the mipmap level to exactly 0, meaning only the base mip level is ever used.
+
+			// Border color 是当 addressMode = CLAMP_TO_BORDER 时，UV 超出 [0,1] 范围返回的固定颜色值。  对 shadow sampler，这个值被当作深度值（取 R = 1.0 或 0.0）参与比较，而不是颜色。
+			.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE, // A3-shadows-?? outside light frustum = lit (no shadow)
+		};
+		VK( vkCreateSampler(rtg.device, &sampler_info, nullptr, &shadow_sampler) );
 	}
 
 	workspaces.resize(rtg.workspaces.size());
@@ -261,10 +298,71 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 				.descriptorPool = descriptor_pool,
 				.descriptorSetCount = 1,
-				.pSetLayouts = &objects_pipeline.set1_TransformsAndLights,
+				.pSetLayouts = &objects_pipeline.set1_TransformsLightsShadows,
 			};
 
 			VK( vkAllocateDescriptorSets(rtg.device, &alloc_info, &workspace.TransformsLights_descriptors) ); // NOTE: we will fill in this descriptor set in render when buffers are [re-]allocated
+		}
+
+		{ // A3-shadows: create per-workspace 2D array shadow image and initialize binding 2
+			uint32_t layers = std::max(1u, shadow_count); // at least 1 layer so the image/view are always valid
+			workspace.shadow_image_array = rtg.helpers.create_image(
+				VkExtent2D{ .width = shadow_resolution, .height = shadow_resolution },
+				depth_format,
+				VK_IMAGE_TILING_OPTIMAL,
+
+				// depth stencil attachment = 用途-写入：作为 framebuffer 的深度附件，Shadow pipeline 渲染时，GPU 把深度值写进这张图；
+				// sampled = 用途-读取：作为 shader 里的纹理采样，Objects pipeline 渲染时，fragment shader 用 texture(shadowMaps, ...) 读这张图
+				VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+				
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				Helpers::Unmapped,
+				0, // no special image create flags
+				layers // arrayLayers
+			);
+
+			{ // 2d array view for sampling in objects.frag
+				VkImageViewCreateInfo create_info{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+					.image = workspace.shadow_image_array.handle,
+					.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+					.format = depth_format,
+					.subresourceRange{ // Specifies which part of the image to view:
+						.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, // this is depth/stencil image, not color
+						.baseMipLevel = 0, .levelCount = 1, // only the base mip level, no mipmaps
+						.baseArrayLayer = 0, .layerCount = layers,
+					},
+				};
+				VK( vkCreateImageView(rtg.device, &create_info, nullptr, &workspace.shadow_image_array_view) );
+			}
+
+			{ // transition all layers: UNDEFINED -> DEPTH_STENCIL_READ_ONLY_OPTIMAL
+				rtg.helpers.transfer_to_image(
+					nullptr, 0, // no pixel data to upload
+					workspace.shadow_image_array,
+					layers,
+					VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+					0, // mip level
+					VK_IMAGE_ASPECT_DEPTH_BIT
+				);
+			}
+
+			// bind the array image to set1 binding 2
+			VkDescriptorImageInfo shadow_image_info{
+				.sampler = shadow_sampler,
+				.imageView = workspace.shadow_image_array_view,
+				.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+			};
+			VkWriteDescriptorSet shadow_write{
+				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+				.dstSet = workspace.TransformsLights_descriptors,
+				.dstBinding = 2,
+				.dstArrayElement = 0,
+				.descriptorCount = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.pImageInfo = &shadow_image_info,
+			};
+			vkUpdateDescriptorSets(rtg.device, 1, &shadow_write, 0, nullptr);
 		}
 
 		// descriptor write for World and Camera:
@@ -1130,6 +1228,11 @@ Tutorial::~Tutorial() {
 
 	rtg.helpers.destroy_image(std::move(brdf_lut_image));
 
+	if (shadow_sampler != VK_NULL_HANDLE) {
+		vkDestroySampler(rtg.device, shadow_sampler, nullptr);
+		shadow_sampler = VK_NULL_HANDLE;
+	}
+
 	for (auto &texture : textures) {
 		rtg.helpers.destroy_image(std::move(texture));
 	}
@@ -1189,6 +1292,12 @@ Tutorial::~Tutorial() {
 			rtg.helpers.destroy_buffer(std::move(workspace.Lights_src));
 		}
 		// TransformsLights_descriptors freed when pool is destroyed
+
+		if (workspace.shadow_image_array_view != VK_NULL_HANDLE) {
+			vkDestroyImageView(rtg.device, workspace.shadow_image_array_view, nullptr);
+			workspace.shadow_image_array_view = VK_NULL_HANDLE;
+		}
+		rtg.helpers.destroy_image(std::move(workspace.shadow_image_array));
 	}
 	workspaces.clear();
 

@@ -69,14 +69,13 @@ struct Tutorial : RTG::Application {
 	struct ObjectsPipeline {
 		// descriptor set layouts:
 		VkDescriptorSetLayout set0_World = VK_NULL_HANDLE;
-		VkDescriptorSetLayout set1_TransformsAndLights;
+		VkDescriptorSetLayout set1_TransformsLightsShadows; // binding 0 = Transform, binding 1 = Lights, binding 2 = Shadows
 		VkDescriptorSetLayout set2_TEXTURE;
 		VkDescriptorSetLayout set3_CubeMap;
 		VkDescriptorSetLayout set4_LambertianCubeMap = VK_NULL_HANDLE;
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE; // A2-normal
 		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // A2-pbr prefiltered GGX specular mipmap
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
-		VkDescriptorSetLayout set8_ShadowMaps = VK_NULL_HANDLE; // array of shadow map samplers for spot lights
 
 		// types for descriptors:
 		struct World { // correspond to layout(set=0, binding=0, std140) uniform World in frag shader
@@ -226,12 +225,10 @@ struct Tutorial : RTG::Application {
 		Helpers::AllocatedBuffer Lights_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Lights; // device-local
 
-		// Per-frame shadow maps (one entry per shadow-casting spot light).
-		// Per-workspace so multiple frames in flight don't race on the same depth image.
+		// A3-shadows: Layer i = shadow map for the i-th shadow-casting spot light.
 		// shadow may change per frame
-		std::vector< Helpers::AllocatedImage > shadow_images;
-		std::vector< VkImageView > shadow_image_views;
-		VkDescriptorSet shadow_maps_descriptors = VK_NULL_HANDLE;
+		Helpers::AllocatedImage shadow_image_array;
+		VkImageView shadow_image_array_view = VK_NULL_HANDLE; // 2D_ARRAY view for sampling in objects.frag (set1 binding 2)
 	};
 	std::vector< Workspace > workspaces;
 
@@ -306,11 +303,10 @@ struct Tutorial : RTG::Application {
 
 	// -- A3-shadows
 	VkRenderPass shadow_render_pass = VK_NULL_HANDLE; // depth-only render pass
-	VkSampler shadow_sampler = VK_NULL_HANDLE; // comparison sampler (LESS_OR_EQUAL)
-	Helpers::AllocatedImage dummy_shadow_image;       // 1x1 depth placeholder for unused atlas slots
-	VkImageView dummy_shadow_image_view = VK_NULL_HANDLE;
-	VkDescriptorPool shadow_descriptor_pool = VK_NULL_HANDLE;
-	// Maps S72::Light* to slot index in each workspace's shadow_images vector.
+	uint32_t shadow_count = 0;      // number of shadow-casting spot lights (counted from s72 at startup)
+	uint32_t shadow_resolution = 1; // shadow map size in texels (max of all light.shadow values)
+	VkSampler shadow_sampler = VK_NULL_HANDLE;
+	// Maps S72::Light* to layer index in each workspace's shadow_image_array.
 	std::unordered_map< S72::Light*, uint32_t > shadow_light_map;
 
 	//--------------------------------------------------------------------

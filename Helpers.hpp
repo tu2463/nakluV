@@ -73,7 +73,8 @@ struct Helpers {
 	// NOTE: in tutorial, image layout after call is VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	// added a VkImageLayout parameter in A2-diffuse to set layout after call to be VK_IMAGE_LAYOUT_GENERAL for storage images
 	// Upload pixel data into an image. mip_level selects which mip to write (default 0); its extent is image.extent >> mip_level.
-	void transfer_to_image(void const *data, size_t size, AllocatedImage &image, uint32_t layerCount = 1, VkImageLayout final_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, uint32_t mip_level = 0);
+	// If data == nullptr, skips the buffer copy and only performs the layout transition (useful for depth images).
+	void transfer_to_image(void const *data, size_t size, AllocatedImage &image, uint32_t layerCount = 1, VkImageLayout final_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, uint32_t mip_level = 0, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
 
 	VkCommandPool transfer_command_pool = VK_NULL_HANDLE;
 	VkCommandBuffer transfer_command_buffer = VK_NULL_HANDLE;

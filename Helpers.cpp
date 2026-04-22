@@ -228,7 +228,7 @@ void Helpers::transfer_to_buffer(void const *data, size_t size, AllocatedBuffer 
 	destroy_buffer(std::move(transfer_src)); // what does std::move do //??
 }
 
-void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount, VkImageLayout final_layout, uint32_t mip_level) {
+void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &target, uint32_t layerCount, VkImageLayout final_layout, uint32_t mip_level, VkImageAspectFlags aspect) {
 	// refsol::Helpers_transfer_to_image(rtg, data, size, &target);
 
 	assert(target.handle != VK_NULL_HANDLE);
@@ -237,21 +237,25 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	uint32_t mip_w = std::max(1u, target.extent.width  >> mip_level);
 	uint32_t mip_h = std::max(1u, target.extent.height >> mip_level);
 
-	size_t bytes_per_block  = vkuFormatTexelBlockSize(target.format);
-	size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
-	assert(size == mip_w * mip_h * layerCount * bytes_per_block / texels_per_block);
+	// data == nullptr: layout-transition only (no upload). Used for depth images that need no pixel data.
+	AllocatedBuffer transfer_src;
+	if (data != nullptr) {
+		size_t bytes_per_block  = vkuFormatTexelBlockSize(target.format);
+		size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
+		assert(size == mip_w * mip_h * layerCount * bytes_per_block / texels_per_block);
 
-	// create a host-coherent (CPU visible) source buffer
-	AllocatedBuffer transfer_src = create_buffer(
-		size,
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,// This buffer will be the source of a copy operation
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // The CPU can see this memory | CPU writes are automatically visible to GPU
-		Mapped
-	);
+		// create a host-coherent (CPU visible) source buffer
+		transfer_src = create_buffer(
+			size,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,// This buffer will be the source of a copy operation
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, // The CPU can see this memory | CPU writes are automatically visible to GPU
+			Mapped
+		);
 
-	// copy image data into the source buffer
-	// Use *data*, not *&data*, because The function signature shows data is already a pointer (void const *data). The bug is using &data which takes the address of the pointer variable itself (on the stack) instead of the data it points to.  
-	std::memcpy(transfer_src.allocation.data(), data, size);
+		// copy image data into the source buffer
+		// Use *data*, not *&data*, because The function signature shows data is already a pointer (void const *data). The bug is using &data which takes the address of the pointer variable itself (on the stack) instead of the data it points to.
+		std::memcpy(transfer_src.allocation.data(), data, size);
+	}
 
 	// begin recording a command buffer
 	VK( vkResetCommandBuffer(transfer_command_buffer, 0) );
@@ -262,12 +266,14 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	VK( vkBeginCommandBuffer(transfer_command_buffer, &begin_info) );
 
 	VkImageSubresourceRange mip_range{
-		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		.aspectMask = aspect,
 		.baseMipLevel = mip_level, // targets the requested mip level (0 = full resolution)
 		.levelCount = 1,
 		.baseArrayLayer = 0,
 		.layerCount = layerCount,
 	};
+
+	if (data != nullptr) { // upload path: UNDEFINED -> TRANSFER_DST -> final_layout
 
 	{ // UNDEFINED -> TRANSFER_DST_OPTIMAL
 		// To tell the GPU to put the image in a specific layout, we use a pipeline barrier command with a VkImageMemoryBarrier structure. 
@@ -320,7 +326,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 			.bufferRowLength   = mip_w,
 			.bufferImageHeight = mip_h,
 			.imageSubresource{ // Frustratingly, the imageSubresource field of VkBufferImageCopy is a VkImageSubresourceLayers not a VkImageSubresourceRange, otherwise we could have used our convenient whole_image structure from above.
-				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.aspectMask = aspect,
 				.mipLevel = mip_level,
 				.baseArrayLayer = base_array_layer_i,
 				.layerCount = 1,
@@ -362,6 +368,26 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		);
 	}
 
+	} else { // layout-transition only path: UNDEFINED -> final_layout (no copy, used for depth images)
+		VkImageMemoryBarrier barrier{
+			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.srcAccessMask = 0,
+			.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+			.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+			.newLayout = final_layout,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image = target.handle,
+			.subresourceRange = mip_range,
+		};
+		vkCmdPipelineBarrier(
+			transfer_command_buffer,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			0, 0, nullptr, 0, nullptr, 1, &barrier
+		);
+	}
+
 	// end and submit the command buffer:
 	VK( vkEndCommandBuffer(transfer_command_buffer) );
 	VkSubmitInfo submit_info{
@@ -371,7 +397,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	};
 	VK( vkQueueSubmit(rtg.graphics_queue, 1, &submit_info, VK_NULL_HANDLE) );
 	VK( vkQueueWaitIdle(rtg.graphics_queue) ); // wait for command buffer to finish executing
-	destroy_buffer(std::move(transfer_src)); // destroy the source buffer:
+	if (data != nullptr) destroy_buffer(std::move(transfer_src)); // destroy the source buffer:
 }
 
 //----------------------------
