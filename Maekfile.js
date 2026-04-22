@@ -69,6 +69,12 @@ const objects_shaders = [
 ];
 main_objs.push( maek.CPP('Tutorial-ObjectsPipeline.cpp', undefined, { depends:[...objects_shaders] } ) );
 
+// shadow depth-only pipeline:
+const shadow_shaders = [
+	maek.GLSLC('shadow.vert'),
+];
+main_objs.push( maek.CPP('Tutorial-ShadowPipeline.cpp', undefined, { depends:[...shadow_shaders] } ) );
+
 // -- A2-diffuse cube util --
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 const cube_objs = [

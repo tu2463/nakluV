@@ -216,7 +216,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			}
 		};
 
-		//the viewport and scrissor state will be set at runtime for the pipeline:
+		// the viewport and scrissor state //?? will be set at runtime for the pipeline:
 		std::vector< VkDynamicState > dynamic_states{
 			VK_DYNAMIC_STATE_VIEWPORT,
 			VK_DYNAMIC_STATE_SCISSOR,
@@ -227,7 +227,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			.pDynamicStates = dynamic_states.data(),
 		};
 
-		//this pipeline will draw triangles:
+		// this pipeline will draw triangles:
 		VkPipelineInputAssemblyStateCreateInfo input_assembly_state{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 			.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -274,7 +274,7 @@ void Tutorial::ObjectsPipeline::create(RTG &rtg, VkRenderPass render_pass, uint3
 			VkPipelineColorBlendAttachmentState{
 				.blendEnable = VK_FALSE,
 				.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-			}, //?? why a comma here, what syntax is this?
+			}, //vv the comma syntax is for initializing arrays
 		};
 		VkPipelineColorBlendStateCreateInfo color_blend_state{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,

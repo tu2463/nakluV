@@ -76,6 +76,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSetLayout set5_NormalMap = VK_NULL_HANDLE; // A2-normal
 		VkDescriptorSetLayout set6_GGXPrefilteredEnvMap = VK_NULL_HANDLE; // A2-pbr prefiltered GGX specular mipmap
 		VkDescriptorSetLayout set7_BRDFLookup = VK_NULL_HANDLE; // BRDF split-sum LUT (NdotV, roughness) -> (scale, bias)
+		VkDescriptorSetLayout set8_ShadowMaps = VK_NULL_HANDLE; // array of shadow map samplers for spot lights
 
 		// types for descriptors:
 		struct World { // correspond to layout(set=0, binding=0, std140) uniform World in frag shader
@@ -144,8 +145,16 @@ struct Tutorial : RTG::Application {
 			// 5th 16 bytes:
 			float limit = std::numeric_limits<float>::infinity(); // optional, will be infinity if not specified
 			float pad[3];
+
+			// 6th–9th 16 bytes: CLIP_FROM_WORLD matrix for spot light shadow; pass world-to-light matrices for spot lights to the frag shader performing lighting
+			float CLIP_FROM_WORLD[16] = {};
+
+			// 10th 16 bytes:
+			int32_t shadow_index = -1; // index into shadowMaps[], -1 = no shadow
+			float shadow_map_size = 1.0f; // edge length in texels, for PCF offset
+			float pad2[2] = {};
 		};
-		static_assert(sizeof(LightData) == 16*5 );
+		static_assert(sizeof(LightData) == 16*10);
 
 		// push constants
 		struct Push {
@@ -169,6 +178,20 @@ struct Tutorial : RTG::Application {
 		void create(RTG &, VkRenderPass render_pass, uint32_t subpass);
 		void destroy(RTG &);
 	} objects_pipeline;
+
+	// depth-only pipeline, for rendering shadow maps from spot lights.
+	struct ShadowPipeline {
+		struct Push {
+			mat4 CLIP_FROM_LOCAL;
+		};
+
+		VkPipelineLayout layout = VK_NULL_HANDLE;
+		using Vertex = PosNorTexTanVertex; // vertex bindigns
+		VkPipeline handle = VK_NULL_HANDLE;
+
+		void create(RTG &, VkRenderPass shadow_render_pass);
+		void destroy(RTG &);
+	} shadow_pipeline;
 
 	//pools from which per-workspace things are allocated:
 	VkCommandPool command_pool = VK_NULL_HANDLE;
@@ -202,6 +225,13 @@ struct Tutorial : RTG::Application {
 		// Light may change per frame, so these buffers need to be in workspace.
 		Helpers::AllocatedBuffer Lights_src; // host coherent; mapped
 		Helpers::AllocatedBuffer Lights; // device-local
+
+		// Per-frame shadow maps (one entry per shadow-casting spot light).
+		// Per-workspace so multiple frames in flight don't race on the same depth image.
+		// shadow may change per frame
+		std::vector< Helpers::AllocatedImage > shadow_images;
+		std::vector< VkImageView > shadow_image_views;
+		VkDescriptorSet shadow_maps_descriptors = VK_NULL_HANDLE;
 	};
 	std::vector< Workspace > workspaces;
 
@@ -273,6 +303,15 @@ struct Tutorial : RTG::Application {
 	SRGB is only correct for color textures because those were painted by artists in the sRGB color space and need gamma decoding to get back to linear light values.
 	*/
 	VkFormat normal_map_format = VK_FORMAT_R8G8B8A8_UNORM;
+
+	// -- A3-shadows
+	VkRenderPass shadow_render_pass = VK_NULL_HANDLE; // depth-only render pass
+	VkSampler shadow_sampler = VK_NULL_HANDLE; // comparison sampler (LESS_OR_EQUAL)
+	Helpers::AllocatedImage dummy_shadow_image;       // 1x1 depth placeholder for unused atlas slots
+	VkImageView dummy_shadow_image_view = VK_NULL_HANDLE;
+	VkDescriptorPool shadow_descriptor_pool = VK_NULL_HANDLE;
+	// Maps S72::Light* to slot index in each workspace's shadow_images vector.
+	std::unordered_map< S72::Light*, uint32_t > shadow_light_map;
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:
