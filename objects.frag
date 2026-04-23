@@ -223,26 +223,18 @@ vec3 direct_pbr(LightData light, vec3 n, vec3 albedo, vec3 F0) {
 // Manual depth comparison because compareEnable=VK_FALSE for macOS compatibility.
 float shadow_pcf(int shadow_i, mat4 clip_from_world, float map_size) {
     // Credit: Rendering Shadows from https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
-    
     //A3-shadows-?? Transform fragment world-space position into light clip space
     vec4 frag_light_clip = clip_from_world * vec4(position, 1.0);
-
-    // Guard: fragment behind the light —> treat as lit (outside frustum)
-    if (frag_light_clip.w <= 0.0) return 1.0;
-
-    // perform perspective divide, returns the frag's light-space position in [-1, 1]
-    vec3 frag_light_ndc = frag_light_clip.xyz / frag_light_clip.w;
-
-    // transform NDC xy -> UV [0,1] to sample from the depth map (depth map is in range [0, 1])
-    vec2 shadow_uv = frag_light_ndc.xy * 0.5 + 0.5;
-
-    // current fragment depth in light space [0,1]
-    float current_depth = frag_light_ndc.z;
+    
+    if (frag_light_clip.w <= 0.0) return 1.0; // Guard: fragment behind the light —> treat as no shadow
+    
+    vec3 frag_light_ndc = frag_light_clip.xyz / frag_light_clip.w; // perform perspective divide, returns the frag's light-space position in [-1, 1]
+    vec2 shadow_uv = frag_light_ndc.xy * 0.5 + 0.5; // transform NDC xy -> UV [0,1] to sample from the depth map (depth map is in range [0, 1])
+    float current_depth = frag_light_ndc.z; // current fragment depth in light space [0,1]
 
     float texel_size = 1.0 / map_size;
-
-    // Small bias to prevent shadow acne (backface culling in shadow pass already helps)
     const float bias = 0.005;
+    const float sample_cnt = 9.0;
 
     // Credit: PCF, shadow acne from https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
     float lit = 0.0; // 0 = no shadow (lit), 1 = shadow
@@ -253,7 +245,7 @@ float shadow_pcf(int shadow_i, mat4 clip_from_world, float map_size) {
             lit += (current_depth <= pcf_depth + bias) ? 1.0 : 0.0;
         }
     }
-    return lit / 9.0;
+    return lit / sample_cnt;
 }
 
 void main() {
