@@ -200,13 +200,14 @@ vec3 direct_pbr(LightData light, vec3 n, vec3 albedo, vec3 F0) {
     float VdotH = max(dot(V, H), 0.0);
 
     // eq10 from from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf. //??
-    float alpha = roughness * roughness;
+    float roughness_clamped = max(roughness, 0.1); 
+    float alpha = roughness_clamped * roughness_clamped; // enforces alpha >= 0.01 to prevent division by 0 in GeometrySchlickGGX
     float distance = 1; // 1 for sun
     float alpha_prime = clamp(alpha + sourceRadius / (2.0 * distance), 0.0, 1.0);
     float normalization = (alpha / alpha_prime) * (alpha / alpha_prime); // energy normalization (Karis Eq.14)
 
     float D = DistributionGGX(NdotH, alpha_prime);
-    float G = GeometrySmith(n, V, L_modified, roughness);
+    float G = GeometrySmith(n, V, L_modified, roughness_clamped);
     vec3 F = FresnelSchlickRoughness(VdotH, F0, roughness);
 
     vec3 specular_brdf = (D * G * F) / max(4.0 * NdotV * NdotL, 0.0001); // Cook-Torrance, eq2 from from https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
