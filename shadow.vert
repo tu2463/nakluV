@@ -12,7 +12,6 @@ layout(location=0) in vec3 Position;
 layout(location=1) in vec3 in_normal;
 layout(location=2) in vec2 in_texCoord;
 layout(location=3) in vec3 in_tangent;  
-layout(location=4) in vec3 in_bitangent;
 
 void main() {
     gl_Position = CLIP_FROM_LOCAL * vec4(Position, 1.0);

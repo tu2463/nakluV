@@ -197,8 +197,9 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	}
 
 	{ // A3-shadows: count shadow-casting spot lights and create comparison sampler
-		for (auto const &[name, light] : s72.lights) {
+		for (auto &[name, light] : s72.lights) {
 			if (std::holds_alternative<S72::Light::Spot>(light.source) && light.shadow > 0) {
+				shadow_light_map[&light] = shadow_count; // shadow_count = layer index = insertion order
 				shadow_count++;
 				shadow_resolution = std::max(shadow_resolution, light.shadow);
 			}
@@ -228,6 +229,65 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		};
 		VK( vkCreateSampler(rtg.device, &sampler_info, nullptr, &shadow_sampler) );
 	}
+
+	{ // A3-shadows: create depth-only shadow render pass
+		VkAttachmentDescription depth_attachment{
+			.format = depth_format,
+			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,        // clear to max depth (1.0) at the start of each shadow pass
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,      // keep depth in memory after the pass; the main pass samples it
+			.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,   // no stencil
+			.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE, // no stencil
+			.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,                    // don't care what was there before; we'll clear it anyway
+			.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // auto-transition on pass end: ready for texture sampling in main pass
+		};
+
+		VkAttachmentReference depth_attachment_ref{
+			.attachment = 0,                                              // index into the attachments array above
+			.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,  // layout Vulkan uses while the subpass is executing depth writes
+		};
+		VkSubpassDescription subpass{
+			.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+			.colorAttachmentCount = 0,                           // depth-only: no color attachments
+			.pDepthStencilAttachment = &depth_attachment_ref,
+		};
+
+		std::array<VkSubpassDependency, 2> dependencies{
+			// Dependency 0: previous frame's main pass may still be sampling the shadow map, we must wait for that read to finish before overwriting the depth values for the new frame.
+			VkSubpassDependency{
+				.srcSubpass = VK_SUBPASS_EXTERNAL, // work outside this render pass (previous frame)
+				.dstSubpass = 0, // this shadow subpass
+				.srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,  // previous frame: shadow was sampled here
+				.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, // this pass: depth writes begin here
+				.srcAccessMask = VK_ACCESS_SHADER_READ_BIT, // previous frame read the shadow map
+				.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, // this pass writes new depth values
+				.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+			},
+
+			// Dependency 1: this shadow pass finishes writing depth (LATE_FRAGMENT_TESTS WRITE), 
+			// need to wait for that before the main pass's fragment shader samples it (FRAGMENT_SHADER READ).
+			VkSubpassDependency{
+				.srcSubpass = 0, // this shadow subpass
+				.dstSubpass = VK_SUBPASS_EXTERNAL, // work outside (the main render pass)
+				.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, // shadow depth writes finish here
+				.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,  // main pass samples the shadow map here
+				.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, // shadow depth writes
+				.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,  // main pass reads via texture()
+				.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+			},
+		};
+		VkRenderPassCreateInfo create_info{
+			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+			.attachmentCount = 1,
+			.pAttachments = &depth_attachment,
+			.subpassCount = 1,
+			.pSubpasses = &subpass,
+			.dependencyCount = uint32_t(dependencies.size()),
+			.pDependencies = dependencies.data(),
+		};
+		VK( vkCreateRenderPass(rtg.device, &create_info, nullptr, &shadow_render_pass) );
+	}
+	shadow_pipeline.create(rtg, shadow_render_pass);
 
 	workspaces.resize(rtg.workspaces.size());
 	for (Workspace &workspace : workspaces) {
@@ -306,7 +366,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 
 		{ // A3-shadows: create per-workspace 2D array shadow image and initialize binding 2
 			uint32_t layers = std::max(1u, shadow_count); // at least 1 layer so the image/view are always valid
-			workspace.shadow_image_array = rtg.helpers.create_image(
+			workspace.shadow_image = rtg.helpers.create_image(
 				VkExtent2D{ .width = shadow_resolution, .height = shadow_resolution },
 				depth_format,
 				VK_IMAGE_TILING_OPTIMAL,
@@ -324,7 +384,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			{ // 2d array view for sampling in objects.frag
 				VkImageViewCreateInfo create_info{
 					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-					.image = workspace.shadow_image_array.handle,
+					.image = workspace.shadow_image.handle,
 					.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
 					.format = depth_format,
 					.subresourceRange{ // Specifies which part of the image to view:
@@ -333,13 +393,13 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 						.baseArrayLayer = 0, .layerCount = layers,
 					},
 				};
-				VK( vkCreateImageView(rtg.device, &create_info, nullptr, &workspace.shadow_image_array_view) );
+				VK( vkCreateImageView(rtg.device, &create_info, nullptr, &workspace.shadow_image_view) );
 			}
 
 			{ // transition all layers: UNDEFINED -> DEPTH_STENCIL_READ_ONLY_OPTIMAL
 				rtg.helpers.transfer_to_image(
 					nullptr, 0, // no pixel data to upload
-					workspace.shadow_image_array,
+					workspace.shadow_image,
 					layers,
 					VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 					0, // mip level
@@ -350,7 +410,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			// bind the array image to set1 binding 2
 			VkDescriptorImageInfo shadow_image_info{
 				.sampler = shadow_sampler,
-				.imageView = workspace.shadow_image_array_view,
+				.imageView = workspace.shadow_image_view,
 				.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 			};
 			VkWriteDescriptorSet shadow_write{
@@ -363,6 +423,36 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.pImageInfo = &shadow_image_info,
 			};
 			vkUpdateDescriptorSets(rtg.device, 1, &shadow_write, 0, nullptr);
+		}
+
+		{ // A3-shadows: create single-layer views for each light and framebuffers for the shadow render pass
+			workspace.shadow_views.resize(shadow_count);
+			workspace.shadow_framebuffers.resize(shadow_count);
+			for (uint32_t shadow_i = 0; shadow_i < shadow_count; shadow_i++) {
+				VkImageViewCreateInfo view_info{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+					.image = workspace.shadow_image.handle,
+					.viewType = VK_IMAGE_VIEW_TYPE_2D,
+					.format = depth_format,
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+						.baseMipLevel = 0, .levelCount = 1,
+						.baseArrayLayer = shadow_i, .layerCount = 1,
+					},
+				};
+				VK( vkCreateImageView(rtg.device, &view_info, nullptr, &workspace.shadow_views[shadow_i]) );
+
+				VkFramebufferCreateInfo create_info{
+					.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+					.renderPass = shadow_render_pass,
+					.attachmentCount = 1,
+					.pAttachments = &workspace.shadow_views[shadow_i],
+					.width = shadow_resolution,
+					.height = shadow_resolution,
+					.layers = 1,
+				};
+				VK( vkCreateFramebuffer(rtg.device, &create_info, nullptr, &workspace.shadow_framebuffers[shadow_i]) );
+			}
 		}
 
 		// descriptor write for World and Camera:
@@ -1293,11 +1383,25 @@ Tutorial::~Tutorial() {
 		}
 		// TransformsLights_descriptors freed when pool is destroyed
 
-		if (workspace.shadow_image_array_view != VK_NULL_HANDLE) {
-			vkDestroyImageView(rtg.device, workspace.shadow_image_array_view, nullptr);
-			workspace.shadow_image_array_view = VK_NULL_HANDLE;
+		if (workspace.shadow_image_view != VK_NULL_HANDLE) {
+			vkDestroyImageView(rtg.device, workspace.shadow_image_view, nullptr);
+			workspace.shadow_image_view = VK_NULL_HANDLE;
 		}
-		rtg.helpers.destroy_image(std::move(workspace.shadow_image_array));
+		rtg.helpers.destroy_image(std::move(workspace.shadow_image));
+
+		for (VkFramebuffer &framebuffer : workspace.shadow_framebuffers) {
+			assert(framebuffer != VK_NULL_HANDLE);
+			vkDestroyFramebuffer(rtg.device, framebuffer, nullptr);
+			framebuffer = VK_NULL_HANDLE;
+		}
+		workspace.shadow_framebuffers.clear();
+
+		for (VkImageView &view : workspace.shadow_views) {
+			assert(view != VK_NULL_HANDLE);
+			vkDestroyImageView(rtg.device, view, nullptr);
+			view = VK_NULL_HANDLE;
+		}
+		workspace.shadow_views.clear();
 	}
 	workspaces.clear();
 
@@ -1310,6 +1414,12 @@ Tutorial::~Tutorial() {
 	background_pipeline.destroy(rtg);
 	lines_pipeline.destroy(rtg);
 	objects_pipeline.destroy(rtg);
+	shadow_pipeline.destroy(rtg);
+
+	if (shadow_render_pass != VK_NULL_HANDLE) {
+		vkDestroyRenderPass(rtg.device, shadow_render_pass, nullptr);
+		shadow_render_pass = VK_NULL_HANDLE;
+	}
 
 	// refsol::Tutorial_destructor(rtg, &render_pass, &command_pool);
 	// destroy command pool:
@@ -1809,8 +1919,17 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 						out->limit = spot.limit;
 						out->fov = spot.fov;
 						out->blend = spot.blend;
+						auto shadow_it = shadow_light_map.find(inst.light); // A3-shadows
+						if (shadow_it != shadow_light_map.end()) {
+							out->shadow_i = int32_t(shadow_it->second);
+							out->shadow_map_size = float(shadow_resolution);
+							mat4 LOCAL_FROM_WORLD = inverse(inst.WORLD_FROM_LOCAL);
+							float far = (std::isinf(spot.limit) || spot.limit <= 0.0f) ? SHADOW_DEFAULT_FAR_LIMIT : spot.limit;
+							mat4 CLIP_FROM_WORLD = perspective(spot.fov, 1.0f, 0.1f, far) * LOCAL_FROM_WORLD;
+							for (int i = 0; i < 16; i++) out->CLIP_FROM_WORLD[i] = CLIP_FROM_WORLD[i];
+						}
 					}
-					
+
 					++out; // move the pointer to the next ObjectsPipeline::LightData-sized chunk of memory
 				}
 			}
@@ -1842,6 +1961,75 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			0, nullptr,							// bufferMemoryBarriers (count, data)
 			0, nullptr							// imageMemoryBarriers (count, data)
 		);
+	}
+
+	// A3-shadows, render shadow maps for each spot light with shadows
+	if (shadow_count > 0 && !object_instances.empty()) { // draw with the shadow pipeline
+		vkCmdBindPipeline(workspace.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadow_pipeline.handle);
+
+		{ // bind object vertex buffer
+			std::array<VkBuffer, 1> vertex_buffers{ object_vertices.handle };
+			std::array<VkDeviceSize, 1> offsets{ 0 };
+			vkCmdBindVertexBuffers(
+				workspace.command_buffer, 
+				0, // first binding; this corresponds to the "binding = 0" in the vertex shader's input definitions (VkVertexInputAttributeDescription from PosNorTexVertex.cpp)
+				1, // binding count
+				vertex_buffers.data(), 
+				offsets.data()
+			);
+		}
+
+		for (Light const &inst : light_instances) {
+			if (!std::holds_alternative<S72::Light::Spot>(inst.light->source)) continue;
+			auto const &spot = std::get<S72::Light::Spot>(inst.light->source);
+			auto shadow_it = shadow_light_map.find(inst.light);
+			if (shadow_it == shadow_light_map.end()) continue;
+			uint32_t shadow_i = shadow_it->second;
+
+			// put GPU commands here
+			// render pass:
+			VkClearValue clear_values{ .depthStencil{ .depth = 1.0f, .stencil = 0 } };
+			VkRenderPassBeginInfo begin_info{
+				.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+				.renderPass = shadow_render_pass,
+				.framebuffer = workspace.shadow_framebuffers[shadow_i],
+				.renderArea{ .offset = { 0, 0 }, .extent = { shadow_resolution, shadow_resolution } },
+				.clearValueCount = 1,
+				.pClearValues = &clear_values,
+			};
+			vkCmdBeginRenderPass(workspace.command_buffer, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+			// run pipelines here:
+			{ // set scissor rectangle:
+				VkRect2D shadow_scissor{ .offset = { 0, 0 }, .extent = { shadow_resolution, shadow_resolution } };
+				vkCmdSetScissor(workspace.command_buffer, 0, 1, &shadow_scissor);
+			}
+
+			{ // configure viewport transform: 
+				VkViewport shadow_viewport{
+					.x = 0.0f, .y = 0.0f,
+					.width = float(shadow_resolution), .height = float(shadow_resolution),
+					.minDepth = 0.0f, .maxDepth = 1.0f,
+				};
+				vkCmdSetViewport(workspace.command_buffer, 0, 1, &shadow_viewport);
+			}
+
+			// CLIP_FROM_WORLD for this spot light: perspective * inv(WORLD_FROM_LOCAL)
+			mat4 LOCAL_FROM_WORLD = inverse(inst.WORLD_FROM_LOCAL);
+			float far = (std::isinf(spot.limit) || spot.limit <= 0.0f) ? SHADOW_DEFAULT_FAR_LIMIT : spot.limit;
+			mat4 CLIP_FROM_WORLD = perspective(spot.fov, 1.0f, 0.1f, far) * LOCAL_FROM_WORLD;
+
+			for (ObjectInstance const &obj : object_instances) {
+				ShadowPipeline::Push push{
+					.CLIP_FROM_LOCAL = CLIP_FROM_WORLD * obj.transform.WORLD_FROM_LOCAL,
+				};
+				vkCmdPushConstants(workspace.command_buffer, shadow_pipeline.layout,
+					VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+				vkCmdDraw(workspace.command_buffer, obj.mesh->count, 1, obj.mesh->first_vertex, 0);
+			}
+
+			vkCmdEndRenderPass(workspace.command_buffer);
+		}
 	}
 
 	// put GPU commands here

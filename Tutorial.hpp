@@ -149,7 +149,7 @@ struct Tutorial : RTG::Application {
 			float CLIP_FROM_WORLD[16] = {};
 
 			// 10th 16 bytes:
-			int32_t shadow_index = -1; // index into shadowMaps[], -1 = no shadow
+			int32_t shadow_i = -1; // index into shadowMaps[], -1 = no shadow
 			float shadow_map_size = 1.0f; // edge length in texels, for PCF offset
 			float pad2[2] = {};
 		};
@@ -185,7 +185,7 @@ struct Tutorial : RTG::Application {
 		};
 
 		VkPipelineLayout layout = VK_NULL_HANDLE;
-		using Vertex = PosNorTexTanVertex; // vertex bindigns
+		using Vertex = PosNorTexTanVertex; // vertex bindings
 		VkPipeline handle = VK_NULL_HANDLE;
 
 		void create(RTG &, VkRenderPass shadow_render_pass);
@@ -227,8 +227,11 @@ struct Tutorial : RTG::Application {
 
 		// A3-shadows: Layer i = shadow map for the i-th shadow-casting spot light.
 		// shadow may change per frame
-		Helpers::AllocatedImage shadow_image_array;
-		VkImageView shadow_image_array_view = VK_NULL_HANDLE; // 2D_ARRAY view for sampling in objects.frag (set1 binding 2)
+		Helpers::AllocatedImage shadow_image;
+		// shadow_layer_views[i] is the write handle (one layer at a time, during the shadow pass), and shadow_image_view is the read handle (all layers at once, during the main pass).
+		VkImageView shadow_image_view = VK_NULL_HANDLE; // 2D_ARRAY view for sampling in objects.frag (set1 binding 2)
+		std::vector<VkImageView> shadow_views; // one single-layer 2D view per shadow light (for framebuffer attachment,  A framebuffer attachment must be a single flat 2D image, not 2D_array view)
+		std::vector<VkFramebuffer> shadow_framebuffers; // one framebuffer per shadow light layer
 	};
 	std::vector< Workspace > workspaces;
 
@@ -306,8 +309,7 @@ struct Tutorial : RTG::Application {
 	uint32_t shadow_count = 0;      // number of shadow-casting spot lights (counted from s72 at startup)
 	uint32_t shadow_resolution = 1; // shadow map size in texels (max of all light.shadow values)
 	VkSampler shadow_sampler = VK_NULL_HANDLE;
-	// Maps S72::Light* to layer index in each workspace's shadow_image_array.
-	std::unordered_map< S72::Light*, uint32_t > shadow_light_map;
+	std::unordered_map< S72::Light*, uint32_t > shadow_light_map; // Maps S72::Light* to layer index in each workspace's shadow_image.
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:
@@ -403,6 +405,7 @@ struct Tutorial : RTG::Application {
 		mat4 WORLD_FROM_LOCAL;
 	};
 	std::vector < Light > light_instances; // at every frame, will transfer Light to LightData and pass to frag shader when creating SSBO
+	static constexpr float SHADOW_DEFAULT_FAR_LIMIT = 1000.0f; // fallback far plane for spot lights with no limit
 
 	// -- objects --
 	std::vector< LinesPipeline::Vertex > lines_vertices;
