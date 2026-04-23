@@ -13,13 +13,16 @@ struct LightData {
     vec3 tint; float fov;
     vec3 direction; float blend;
     float angle; float strength; float radius; float power;
-    float limit;
+    float limit; float _pad0; float _pad1; float _pad2;
+    mat4 CLIP_FROM_WORLD;
+    int shadow_index; float shadow_map_size; float _pad3; float _pad4; // shadow_index=-1 means no shadow
 };
 
 layout(set=1, binding=1, std140) readonly buffer Lights {
     LightData LIGHTS[];
 };
 
+layout(set=1, binding=2) uniform sampler2DArray shadowMaps; // A3-shadows
 layout(set=2, binding=0) uniform sampler2D TEXTURE;
 layout(set=3, binding=0) uniform samplerCube cubeMap; // radiance cubemap (mirror / environment materials); binding=0 was specified at VkDescriptorSetLayoutBinding
 layout(set=4, binding=0) uniform samplerCube lambertianCubeMap; // prefiltered irradiance cubemap (X.lambertian.png, lambertian material)
@@ -216,6 +219,43 @@ vec3 direct_pbr(LightData light, vec3 n, vec3 albedo, vec3 F0) {
     return light.tint * (e_diffuse + e_specular);
 }
 
+// A3-shadows: Returns shadow factor [0=fully shadowed, 1=fully lit] using 9-sample PCF for filtering.
+// Manual depth comparison because compareEnable=VK_FALSE for macOS compatibility.
+float shadow_pcf(int shadow_idx, mat4 clip_from_world, float map_size) {
+    // Credit: Rendering Shadows from https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
+    
+    //A3-shadows-?? Transform fragment world-space position into light clip space
+    vec4 frag_light_clip = clip_from_world * vec4(position, 1.0);
+
+    // Guard: fragment behind the light —> treat as lit (outside frustum)
+    if (frag_light_clip.w <= 0.0) return 1.0;
+
+    // perform perspective divide, returns the frag's light-space position in [-1, 1]
+    vec3 frag_light_ndc = frag_light_clip.xyz / frag_light_clip.w;
+
+    // transform NDC xy -> UV [0,1] to sample from the depth map (depth map is in range [0, 1])
+    vec2 shadow_uv = frag_light_ndc.xy * 0.5 + 0.5;
+
+    // current fragment depth in light space [0,1]
+    float current_depth = frag_light_ndc.z;
+
+    float texel_size = 1.0 / map_size;
+
+    // Small bias to prevent shadow acne (backface culling in shadow pass already helps)
+    const float bias = 0.005;
+
+    // Credit: PCF, shadow acne from https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
+    float lit = 0.0; // 0 = no shadow (lit), 1 = shadow
+    for (int dx = -1; dx <= 1; dx++) { // dx and dy are: -1, 0, 1 -> take 9 samples
+        for (int dy = -1; dy <= 1; dy++) {
+            vec2 offset = vec2(float(dx), float(dy)) * texel_size;
+            float pcf_depth = texture(shadowMaps, vec3(shadow_uv + offset, float(shadow_idx))).r;
+            lit += (current_depth <= pcf_depth + bias) ? 1.0 : 0.0;
+        }
+    }
+    return lit / 9.0;
+}
+
 void main() {
     // A2-normal
     vec3 N = normalize(normal);
@@ -271,7 +311,11 @@ void main() {
         // A3-materials: add direct light contributions
         vec3 direct = vec3(0.0);
         for (int i = 0; i < lights_count; i++) {
-            direct += direct_pbr(LIGHTS[i], n, albedo, F0);
+            float shadow_factor = 1.0;
+            if (LIGHTS[i].shadow_index >= 0) { // A3-shadows
+                shadow_factor = shadow_pcf(LIGHTS[i].shadow_index, LIGHTS[i].CLIP_FROM_WORLD, LIGHTS[i].shadow_map_size);
+            }
+            direct += direct_pbr(LIGHTS[i], n, albedo, F0) * shadow_factor;
         }
         hdr += direct * pow(2.0, float(exposure));
     } else {
@@ -279,7 +323,11 @@ void main() {
         if (material_type == 1) { // lambertian: sample the prefiltered irradiance cubemap at n; stores (incoming radiance at n)/PI, multiplying by albedo gives Lambertian output
             mat_light = texture(lambertianCubeMap, n).rgb;
             for (int i = 0; i < lights_count; i++) {
-                mat_light += direct_lambertian(LIGHTS[i], n, albedo); // A3-materials: adding contributions from direct lights
+                float shadow_factor = 1.0;
+                if (LIGHTS[i].shadow_index >= 0) { // A3-shadows
+                    shadow_factor = shadow_pcf(LIGHTS[i].shadow_index, LIGHTS[i].CLIP_FROM_WORLD, LIGHTS[i].shadow_map_size);
+                }
+                mat_light += direct_lambertian(LIGHTS[i], n, albedo) * shadow_factor; // A3-materials: adding contributions from direct lights
             }
         } else if (material_type == 2) { // mirror
             vec3 I = normalize(position - EYE);
