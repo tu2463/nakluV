@@ -19,6 +19,7 @@ struct S72 {
     static S72 load(std::string const &file);
     void process_meshes(); // extract vertices from binary data into pooled buffer
     void process_textures(); // load texture images from disk using stb_image
+    void process_clouds(); // load VDB cloud grids from disk using OpenVDB
 
     // Pooled vertex data (populated by process_meshes):
     std::vector<PosNorTexTanVertex> vertices;
@@ -33,6 +34,7 @@ struct S72 {
 	struct Material;
 	struct Environment;
 	struct Light;
+	struct Cloud;
 
     //-------------------------------------------------
 	//s72 Scenes contain:
@@ -381,13 +383,15 @@ struct S72 {
 
     struct Cloud {
         std::string name;
-        std::string src;
+        std::string src; // src used in the s72 file
+        
+        std::string path; ////computed during loading, path to VDB file, taking into account path to s72 file // Final-TODO: add an example to demonstarte src vs path
 
         // VDB data
         struct GridData
         {   
             // e.g file_bbox_max: [511, 63, 511] file_bbox_min: [0, 0, 0]
-            int voxels_x = 0, voxels_y = 0, voxels_z = 0;
+            int nx = 0, ny = 0, nz = 0;
             std::vector<float> values; // flat [z][y][x] row-major
         };
         GridData dimensional_profile;
@@ -395,6 +399,4 @@ struct S72 {
         GridData density_scale;
     };
     std::unordered_map<std::string, Cloud> clouds;
-
-    // void process_clouds(); // load VDB files
 };

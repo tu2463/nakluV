@@ -6,6 +6,8 @@
 #include <fstream>
 #include <limits>
 #include <algorithm>
+#include <cstring>
+#include <openvdb/openvdb.h>
 #include "PosNorTexTanVertex.hpp"
 #include "stb_image.h"
 
@@ -497,6 +499,32 @@ S72 S72::load(std::string const &scene_file) {
 				node.light = &s72.lights[ref];
 				object.erase(f);
 			}
+
+			if (auto f = object.find("cloud"); f != object.end()) {
+				std::string ref;
+				try {
+					ref = f->second.as_string().value();
+				} catch (std::exception &) {
+					throw std::runtime_error("Node \"" + name + "\"'s cloud should be a string.");
+				}
+
+				auto cloud = s72.clouds.find(ref);
+				if (cloud == s72.clouds.end()) {
+					throw std::runtime_error("NODE \"" + name + "\" references unknown CLOUD: " + ref);
+				}
+				node.cloud = &cloud->second;
+				object.erase(f);
+			}
+
+        } else if (type == "CLOUD") {
+			Cloud &cloud = s72.clouds[name];
+
+			if (cloud.name != "") {
+				throw std::runtime_error("Multiple \"CLOUD\" objects with name \"" + name + "\".");
+			}
+
+			cloud.name = name;
+			cloud.src = extract_string(&object, "src", "Cloud \"" + name + "\"'s src");
 
         } else if (type == "MESH") {
             //reference to the thing we are parsing into:
@@ -1030,6 +1058,10 @@ S72 S72::load(std::string const &scene_file) {
 		value.path = scene_folder + value.src; // ../example_scene/wood_nor.png
 	}
 
+	for (auto &[key, value] : s72.clouds) {
+		value.path = scene_folder + value.src; // ../example_scene/clouds/nubis_cloud1.vdb
+	}
+
     // load the DataFiles from disk in binary mode // Credit: Zulip discussions https://15-472-s26.zulipchat.com/#narrow/channel/560762-C.2B.2B/topic/Reading.20A.20File/with/572892122
     for (auto &[key, data_file] : s72.data_files) {
         // Open file in binary mode, positioned at end (ate) to get size
@@ -1157,4 +1189,67 @@ void S72::process_textures() {
     }
 
     std::cout << "Loaded " << textures.size() << " textures." << std::endl;
+}
+
+void S72::process_clouds() {
+	openvdb::initialize();
+
+	for (auto &[name, cloud] : clouds) {
+		std::cout << "Loading cloud VDB: " << cloud.path << std::endl;
+
+		openvdb::io::File file(cloud.path);
+		file.open();
+
+		auto load_grid = [&](std::string const &grid_name) -> Cloud::GridData {
+			Cloud::GridData data;
+
+			openvdb::GridBase::Ptr base = file.readGrid(grid_name);
+			openvdb::FloatGrid::Ptr grid = openvdb::gridPtrCast<openvdb::FloatGrid>(base);
+			if (!grid) {
+				throw std::runtime_error("Cloud \"" + name + "\" grid \"" + grid_name + "\" is missing or is not a FloatGrid.");
+			}
+
+			openvdb::CoordBBox bbox;
+			if (!grid->tree().evalActiveVoxelBoundingBox(bbox)) {
+				throw std::runtime_error("Cloud \"" + name + "\" grid \"" + grid_name + "\" has no active voxels.");
+			}
+
+			openvdb::Coord dim = bbox.dim();
+			data.nx = dim.x();
+			data.ny = dim.y();
+			data.nz = dim.z();
+
+			size_t const count = size_t(data.nx) * size_t(data.ny) * size_t(data.nz);
+			data.values.assign(count, 0.0f);
+
+			auto accessor = grid->getConstAccessor();
+			for (int z = 0; z < data.nz; ++z) {
+				for (int y = 0; y < data.ny; ++y) {
+					for (int x = 0; x < data.nx; ++x) {
+						openvdb::Coord coord(
+							bbox.min().x() + x,
+							bbox.min().y() + y,
+							bbox.min().z() + z
+						);
+						size_t const index = size_t(z) * size_t(data.ny) * size_t(data.nx)
+							+ size_t(y) * size_t(data.nx)
+							+ size_t(x);
+						data.values[index] = accessor.getValue(coord);
+					}
+				}
+			}
+
+			std::cout << "  Loaded grid " << grid_name << ": "
+				<< data.nx << "x" << data.ny << "x" << data.nz
+				<< " (" << data.values.size() << " voxels)" << std::endl;
+
+			return data;
+		};
+
+		cloud.dimensional_profile = load_grid("dimensional_profile");
+		cloud.detail_type = load_grid("detail_type");
+		cloud.density_scale = load_grid("density_scale");
+
+		file.close();
+	}
 }

@@ -135,6 +135,7 @@ int main(int argc, char **argv) {
 			s72 = S72::load(configuration.scene_file);
 			s72.process_meshes(); // extract vertices from binary data
 			s72.process_textures(); // load texture images from disk
+			s72.process_clouds(); // load VDB cloud grids from disk
 		} catch (std::exception &e) {
 			// - e — the caught exception object
 			// - .what() — returns a const char* (C-string) containing the message passed when the exception was thrown

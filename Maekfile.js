@@ -117,7 +117,9 @@ const brdf_exe = maek.LINK([...brdf_objs], 'bin/brdf');
 // 	prebuilt_objs.push(`pre/${maek.OS}-${process.arch}/refsol${maek.DEFAULT_OPTIONS.objSuffix}`);
 // }
 
-const main_exe = maek.LINK([...main_objs], 'bin/main');
+const main_exe = maek.LINK([...main_objs], 'bin/main', {
+	LINKLibs: [...maek.options.LINKLibs, ...maek.OPENVDB_LINK_LIBS],
+});
 
 //default targets:
 maek.TARGETS = [main_exe, cube_exe, brdf_exe];
@@ -132,6 +134,7 @@ function custom_flags_and_rules() {
 		console.log(`Using VULKAN_SDK='${VULKAN_SDK}'; set VULKAN_SDK environment variable to override.`);
 		const GLFW_DIR = process.env.GLFW_DIR || `../glfw-3.4/out`;
 		console.log(`Using GLFW_DIR='${GLFW_DIR}'; set GLFW_DIR environment variable to override.`);
+		// Final-TODO: manage open vdb for linux
 
 		maek.options.CPP = ['g++', '-std=c++20', '-Wall', '-Werror', '-g'];
 		maek.options.LINK = ['g++', '-std=c++20', '-Wall', '-Werror', '-g'];
@@ -139,7 +142,6 @@ function custom_flags_and_rules() {
 		maek.options.CPPFlags = [
 			'-O2',
 			`-I${VULKAN_SDK}/include`,
-			`-I${GLFW_DIR}/include`
 		];
 
 		maek.options.LINKLibs = [
@@ -154,6 +156,7 @@ function custom_flags_and_rules() {
 	} else if (maek.OS === 'windows') {
 		VULKAN_SDK = process.env.VULKAN_SDK || `${process.env.USERPROFILE}/VulkanSDK/1.4.335.0`;
 		console.log(`Using VULKAN_SDK='${VULKAN_SDK}'; set VULKAN_SDK environment variable to override.`);
+		// Final-TODO: manage open vdb for windows
 
 		maek.options.CPP = ['cl.exe', '/nologo', '/EHsc', '/Z7', '/std:c++20', '/W4', '/WX', '/MD'];
 		maek.options.LINK = ['link.exe', '/nologo', '/SUBSYSTEM:CONSOLE', '/DEBUG:FASTLINK', '/INCREMENTAL:NO'];
@@ -182,6 +185,8 @@ function custom_flags_and_rules() {
 		const fs = require('fs');
 		VULKAN_SDK = process.env.VULKAN_SDK || `${process.env.HOME}/VulkanSDK/1.4.335.1/macOS`;
 		console.log(`Using VULKAN_SDK='${VULKAN_SDK}'; set VULKAN_SDK environment variable to override.`);
+		const OPENVDB_DIR = process.env.OPENVDB_DIR || `/opt/homebrew`;
+		console.log(`Using OPENVDB_DIR='${OPENVDB_DIR}'; set OPENVDB_DIR environment variable to override.`);
 
 		maek.options.CPP = ['clang++', '-std=c++20', '-Wall', '-Werror', '-g'];
 		maek.options.LINK = ['clang++', '-std=c++20', '-Wall', '-Werror', '-g'];
@@ -189,6 +194,7 @@ function custom_flags_and_rules() {
 		maek.options.CPPFlags = [
 			'-O2',
 			`-I${VULKAN_SDK}/include`,
+			`-I${OPENVDB_DIR}/include`, //for brew-installed OpenVDB
 			`-I/opt/homebrew/include`, //for brew-installed GLFW
 			`-I../glfw-3.4.bin.MACOS/include`, //for release from github
 		];
@@ -203,6 +209,7 @@ function custom_flags_and_rules() {
 			'-framework', 'QuartzCore',
 			'-framework', 'IOKit',
 		];
+		maek.OPENVDB_LINK_LIBS = [`-L${OPENVDB_DIR}/lib`, `-lopenvdb`, `-ltbb`];
 
 	} else {
 		console.error(`Unsupported OS: ${maek.OS}.`);
