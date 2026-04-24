@@ -140,6 +140,43 @@ for obj in bpy.data.objects:
 #suggested by https://stackoverflow.com/questions/70282889/to-mesh-in-blender-3
 dg = bpy.context.evaluated_depsgraph_get()
 
+# final project: cloud rendering
+CLOUD_PREFIX = "CLOUD_"
+
+def is_cloud_proxy(obj):
+	return obj.name.startswith(CLOUD_PREFIX)
+
+def cloud_name_from_obj(obj):
+	name = obj.name[len(CLOUD_PREFIX):]
+	if name == "":
+		print(f"ERROR: cloud proxy '{obj.name}' is missing an asset name after '{CLOUD_PREFIX}'.")
+		exit(1)
+	return name
+
+def cloud_src_from_obj(obj):
+	return obj.get("cloud_src", f"clouds/{cloud_name_from_obj(obj)}.vdb")
+
+def collect_cloud_assets(from_collection):
+	cloud_assets = dict()
+	for obj in from_collection.all_objects:
+		if not is_cloud_proxy(obj): continue
+		name = cloud_name_from_obj(obj)
+		src = cloud_src_from_obj(obj)
+		if name in cloud_assets and cloud_assets[name] != src:
+			print(f"ERROR: cloud asset '{name}' has conflicting cloud_src values: '{cloud_assets[name]}' and '{src}'.")
+			exit(1)
+		cloud_assets[name] = src
+	return cloud_assets
+
+def write_cloud_assets(from_collection):
+	global out
+	for name, src in collect_cloud_assets(from_collection).items():
+		out.append('{\n')
+		out.append(f'\t"type":"CLOUD",\n')
+		out.append(f'\t"name":{json.dumps(name)},\n')
+		out.append(f'\t"src":{json.dumps(src)}\n')
+		out.append('},\n')
+
 def write_material(mat):
 	global out, material_to_ref
 
@@ -561,6 +598,7 @@ def write_node(obj, extra_children=[]):
 	camera = None
 	environment = None
 	light = None
+	cloud = None
 	children = []
 
 	if obj.name.startswith("!environment:"):
@@ -573,7 +611,9 @@ def write_node(obj, extra_children=[]):
 		for child in obj.children:
 			children.append(write_node(child))
 
-		if obj.type == 'MESH':
+		if is_cloud_proxy(obj):
+			cloud = cloud_name_from_obj(obj)
+		elif obj.type == 'MESH':
 			mesh = write_mesh(obj)
 		elif obj.type == 'CAMERA':
 			camera = write_camera(obj)
@@ -610,6 +650,8 @@ def write_node(obj, extra_children=[]):
 		out.append(f',\n\t"environment":{json.dumps(environment)}')
 	if light != None:
 		out.append(f',\n\t"light":{json.dumps(light)}')
+	if cloud != None:
+		out.append(f',\n\t"cloud":{json.dumps(cloud)}')
 
 	children += extra_children
 	if len(children) > 0:
@@ -638,6 +680,7 @@ def write_nodes(from_collection):
 if frames != None: bpy.context.scene.frame_set(frames[0], subframe=0.0)
 
 #write the scene:
+write_cloud_assets(collection)
 roots = write_nodes(collection)
 
 #handle writing "DRIVER" objects by sampling every frame:
