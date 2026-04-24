@@ -266,6 +266,24 @@ struct Tutorial : RTG::Application {
 	std::vector< VkDescriptorSet>  normal_map_descriptors;
 	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
 
+	struct CloudChannelTexture {
+		Helpers::AllocatedImage image;
+		VkImageView view = VK_NULL_HANDLE;
+	};
+
+	struct CloudData {
+		CloudChannelTexture dimensional_profile;
+		CloudChannelTexture detail_type;
+		CloudChannelTexture density_scale;
+		VkDescriptorSet descriptors = VK_NULL_HANDLE;
+	};
+
+	VkDescriptorSetLayout cloud_descriptor_set_layout = VK_NULL_HANDLE; // bindings 0, 1, 2 = Nubis VDB float grids
+	VkDescriptorPool cloud_descriptor_pool = VK_NULL_HANDLE;
+	VkSampler cloud_sampler = VK_NULL_HANDLE;
+	std::vector< CloudData > cloud_textures;
+	std::unordered_map< S72::Cloud*, uint32_t > cloud_index_map;
+
 	// A2-pbr: BRDF split-sum LUT (precomputed 2D texture, stored as brdf_lut.bin)
 	Helpers::AllocatedImage brdf_lut_image;
 	VkImageView brdf_lut_view = VK_NULL_HANDLE;
@@ -309,7 +327,7 @@ struct Tutorial : RTG::Application {
 	uint32_t shadow_count = 0;      // number of shadow-casting spot lights (counted from s72 at startup)
 	uint32_t shadow_resolution = 1; // shadow map size in texels (max of all light.shadow values)
 	VkSampler shadow_sampler = VK_NULL_HANDLE;
-	std::unordered_map< S72::Light*, uint32_t > shadow_light_map; // Maps S72::Light* to layer index in each workspace's shadow_image.
+	std::unordered_map< S72::Light*, uint32_t > shadow_light_index_map; // Maps S72::Light* to layer index in each workspace's shadow_image.
 
 	//--------------------------------------------------------------------
 	//Resources that change when the swapchain is resized:

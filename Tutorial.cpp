@@ -199,7 +199,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	{ // A3-shadows: count shadow-casting spot lights and create comparison sampler
 		for (auto &[name, light] : s72.lights) {
 			if (std::holds_alternative<S72::Light::Spot>(light.source) && light.shadow > 0) {
-				shadow_light_map[&light] = shadow_count; // shadow_count = layer index = insertion order
+				shadow_light_index_map[&light] = shadow_count; // shadow_count = layer index = insertion order
 				shadow_count++;
 				shadow_resolution = std::max(shadow_resolution, light.shadow);
 			}
@@ -1016,6 +1016,164 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		);
 	}
 
+	{ // Final project: upload Nubis VDB cloud channels as sampled 3D textures.
+		if (!s72.clouds.empty()) {
+			std::array<VkDescriptorSetLayoutBinding, 3> bindings{
+				VkDescriptorSetLayoutBinding{
+					.binding = 0,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+				},
+				VkDescriptorSetLayoutBinding{
+					.binding = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+				},
+				VkDescriptorSetLayoutBinding{
+					.binding = 2,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+					.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+				},
+			};
+
+			VkDescriptorSetLayoutCreateInfo layout_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+				.bindingCount = uint32_t(bindings.size()),
+				.pBindings = bindings.data(),
+			};
+			VK(vkCreateDescriptorSetLayout(rtg.device, &layout_info, nullptr, &cloud_descriptor_set_layout));
+
+			VkSamplerCreateInfo sampler_info{
+				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+				.magFilter = VK_FILTER_LINEAR,
+				.minFilter = VK_FILTER_LINEAR,
+				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+				.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+				.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+				.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+				.mipLodBias = 0.0f,
+				.anisotropyEnable = VK_FALSE,
+				.maxAnisotropy = 1.0f,
+				.compareEnable = VK_FALSE,
+				.compareOp = VK_COMPARE_OP_ALWAYS,
+				.minLod = 0.0f,
+				.maxLod = 0.0f,
+				.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+				.unnormalizedCoordinates = VK_FALSE,
+			};
+			VK(vkCreateSampler(rtg.device, &sampler_info, nullptr, &cloud_sampler));
+
+			VkDescriptorPoolSize pool_size{
+				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = uint32_t(s72.clouds.size() * 3),
+			};
+			VkDescriptorPoolCreateInfo pool_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+				.maxSets = uint32_t(s72.clouds.size()),
+				.poolSizeCount = 1,
+				.pPoolSizes = &pool_size,
+			};
+			VK(vkCreateDescriptorPool(rtg.device, &pool_info, nullptr, &cloud_descriptor_pool));
+
+			auto upload_cloud_channel = [&](S72::Cloud const &cloud, char const *channel_name, S72::Cloud::GridData const &grid) {
+				if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0 || grid.values.empty()) {
+					throw std::runtime_error("Cloud \"" + cloud.name + "\" channel \"" + channel_name + "\" has no loaded voxel data.");
+				}
+
+				CloudChannelTexture texture;
+				texture.image = rtg.helpers.create_image_3d(
+					VkExtent3D{
+						.width = uint32_t(grid.nx),
+						.height = uint32_t(grid.ny),
+						.depth = uint32_t(grid.nz),
+					},
+					VK_FORMAT_R32_SFLOAT,
+					VK_IMAGE_TILING_OPTIMAL,
+					VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+					Helpers::Unmapped
+				);
+				rtg.helpers.transfer_to_image(
+					grid.values.data(),
+					grid.values.size() * sizeof(grid.values[0]),
+					texture.image
+				);
+
+				VkImageViewCreateInfo view_info{
+					.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+					.image = texture.image.handle,
+					.viewType = VK_IMAGE_VIEW_TYPE_3D,
+					.format = texture.image.format,
+					.subresourceRange{
+						.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+						.baseMipLevel = 0,
+						.levelCount = 1,
+						.baseArrayLayer = 0,
+						.layerCount = 1,
+					},
+				};
+				VK(vkCreateImageView(rtg.device, &view_info, nullptr, &texture.view));
+				return texture;
+			};
+
+			cloud_textures.reserve(s72.clouds.size());
+			for (auto &[name, cloud] : s72.clouds) {
+				uint32_t cloud_index = uint32_t(cloud_textures.size());
+				cloud_index_map[&cloud] = cloud_index;
+
+				CloudData gpu_cloud;
+				gpu_cloud.dimensional_profile = upload_cloud_channel(cloud, "dimensional_profile", cloud.dimensional_profile);
+				gpu_cloud.detail_type = upload_cloud_channel(cloud, "detail_type", cloud.detail_type);
+				gpu_cloud.density_scale = upload_cloud_channel(cloud, "density_scale", cloud.density_scale);
+
+				VkDescriptorSetAllocateInfo alloc_info{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+					.descriptorPool = cloud_descriptor_pool,
+					.descriptorSetCount = 1,
+					.pSetLayouts = &cloud_descriptor_set_layout,
+				};
+				VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &gpu_cloud.descriptors));
+
+				std::array<VkDescriptorImageInfo, 3> image_infos{
+					VkDescriptorImageInfo{
+						.sampler = cloud_sampler,
+						.imageView = gpu_cloud.dimensional_profile.view,
+						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					},
+					VkDescriptorImageInfo{
+						.sampler = cloud_sampler,
+						.imageView = gpu_cloud.detail_type.view,
+						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					},
+					VkDescriptorImageInfo{
+						.sampler = cloud_sampler,
+						.imageView = gpu_cloud.density_scale.view,
+						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					},
+				};
+				std::array<VkWriteDescriptorSet, 3> writes{};
+				for (uint32_t binding = 0; binding < uint32_t(writes.size()); ++binding) {
+					writes[binding] = VkWriteDescriptorSet{
+						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+						.dstSet = gpu_cloud.descriptors,
+						.dstBinding = binding,
+						.dstArrayElement = 0,
+						.descriptorCount = 1,
+						.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+						.pImageInfo = &image_infos[binding],
+					};
+				}
+				vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
+
+				cloud_textures.emplace_back(std::move(gpu_cloud));
+				std::cout << "Created GPU cloud textures for: " << name << std::endl;
+			}
+		}
+	}
+
 	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
 		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
 			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
@@ -1266,6 +1424,40 @@ Tutorial::~Tutorial() {
 		ggx_descriptors = VK_NULL_HANDLE;
 		brdf_lut_descriptors = VK_NULL_HANDLE;
 	}
+
+	if (cloud_descriptor_pool) {
+		vkDestroyDescriptorPool(rtg.device, cloud_descriptor_pool, nullptr);
+		cloud_descriptor_pool = VK_NULL_HANDLE;
+		for (CloudData &cloud : cloud_textures) {
+			cloud.descriptors = VK_NULL_HANDLE;
+		}
+	}
+
+	if (cloud_descriptor_set_layout) {
+		vkDestroyDescriptorSetLayout(rtg.device, cloud_descriptor_set_layout, nullptr);
+		cloud_descriptor_set_layout = VK_NULL_HANDLE;
+	}
+
+	if (cloud_sampler) {
+		vkDestroySampler(rtg.device, cloud_sampler, nullptr);
+		cloud_sampler = VK_NULL_HANDLE;
+	}
+
+	auto destroy_cloud_channel = [&](CloudChannelTexture &channel) {
+		if (channel.view != VK_NULL_HANDLE) {
+			vkDestroyImageView(rtg.device, channel.view, nullptr);
+			channel.view = VK_NULL_HANDLE;
+		}
+		rtg.helpers.destroy_image(std::move(channel.image));
+	};
+
+	for (CloudData &cloud : cloud_textures) {
+		destroy_cloud_channel(cloud.dimensional_profile);
+		destroy_cloud_channel(cloud.detail_type);
+		destroy_cloud_channel(cloud.density_scale);
+	}
+	cloud_textures.clear();
+	cloud_index_map.clear();
 
 	if (texture_sampler) {
 		vkDestroySampler(rtg.device, texture_sampler, nullptr);
@@ -1923,8 +2115,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 						out->limit = spot.limit;
 						out->fov = spot.fov;
 						out->blend = spot.blend;
-						auto shadow_it = shadow_light_map.find(inst.light); // A3-shadows
-						if (shadow_it != shadow_light_map.end()) {
+						auto shadow_it = shadow_light_index_map.find(inst.light); // A3-shadows
+						if (shadow_it != shadow_light_index_map.end()) {
 							out->shadow_i = int32_t(shadow_it->second);
 							out->shadow_map_size = float(shadow_resolution);
 							mat4 LOCAL_FROM_WORLD = inverse(inst.WORLD_FROM_LOCAL);
@@ -1988,8 +2180,8 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 		for (Light const &inst : light_instances) {
 			if (!std::holds_alternative<S72::Light::Spot>(inst.light->source)) continue;
 			auto const &spot = std::get<S72::Light::Spot>(inst.light->source);
-			auto shadow_it = shadow_light_map.find(inst.light);
-			if (shadow_it == shadow_light_map.end()) continue;
+			auto shadow_it = shadow_light_index_map.find(inst.light);
+			if (shadow_it == shadow_light_index_map.end()) continue;
 			uint32_t shadow_i = shadow_it->second;
 
 			// put GPU commands here

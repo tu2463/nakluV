@@ -126,6 +126,7 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 	AllocatedImage image;
 	// refsol::Helpers_create_image(rtg, extent, format, tiling, usage, properties, (map == Mapped), &image);
 	image.extent = extent;
+	image.depth = 1;
 	image.format = format;
 
 	VkImageCreateInfo create_info{
@@ -161,12 +162,44 @@ Helpers::AllocatedImage Helpers::create_image(VkExtent2D const &extent, VkFormat
 	return image;
 }
 
+Helpers::AllocatedImage Helpers::create_image_3d(VkExtent3D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map, uint32_t mipLevels) {
+	AllocatedImage image;
+	image.extent = VkExtent2D{.width = extent.width, .height = extent.height};
+	image.depth = extent.depth;
+	image.format = format;
+
+	VkImageCreateInfo create_info{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		.imageType = VK_IMAGE_TYPE_3D,
+		.format = format,
+		.extent = extent,
+		.mipLevels = mipLevels,
+		.arrayLayers = 1,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.tiling = tiling,
+		.usage = usage,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.flags = 0,
+	};
+
+	VK(vkCreateImage(rtg.device, &create_info, nullptr, &image.handle));
+
+	VkMemoryRequirements req;
+	vkGetImageMemoryRequirements(rtg.device, image.handle, &req);
+
+	image.allocation = allocate(req, properties, map);
+	VK(vkBindImageMemory(rtg.device, image.handle, image.allocation.handle, image.allocation.offset));
+	return image;
+}
+
 void Helpers::destroy_image(AllocatedImage &&image) {
 	// refsol::Helpers_destroy_image(rtg, &image);
 	vkDestroyImage(rtg.device, image.handle, nullptr);
 
 	image.handle = VK_NULL_HANDLE;
 	image.extent = VkExtent2D{.width = 0, .height = 0};
+	image.depth = 1;
 	image.format = VK_FORMAT_UNDEFINED;
 
 	this->free(std::move(image.allocation));
@@ -236,13 +269,14 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 	// compute the extent of the requested mip level (mip 0 = full resolution)
 	uint32_t mip_w = std::max(1u, target.extent.width  >> mip_level);
 	uint32_t mip_h = std::max(1u, target.extent.height >> mip_level);
+	uint32_t mip_d = std::max(1u, target.depth >> mip_level);
 
 	// data == nullptr: layout-transition only (no upload). Used for depth images that need no pixel data.
 	AllocatedBuffer transfer_src;
 	if (data != nullptr) {
 		size_t bytes_per_block  = vkuFormatTexelBlockSize(target.format);
 		size_t texels_per_block = vkuFormatTexelsPerBlock(target.format);
-		assert(size == mip_w * mip_h * layerCount * bytes_per_block / texels_per_block);
+		assert(size == size_t(mip_w) * size_t(mip_h) * size_t(mip_d) * size_t(layerCount) * bytes_per_block / texels_per_block);
 
 		// create a host-coherent (CPU visible) source buffer
 		transfer_src = create_buffer(
@@ -332,7 +366,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 				.layerCount = 1,
 			},
 			.imageOffset{ .x = 0, .y = 0, .z = 0 },
-			.imageExtent = { mip_w, mip_h, 1 },
+			.imageExtent = { mip_w, mip_h, mip_d },
 		};
 		vkCmdCopyBufferToImage(transfer_command_buffer,
 			transfer_src.handle, target.handle,
@@ -360,7 +394,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		vkCmdPipelineBarrier(
 			transfer_command_buffer, // commandBuffer
 			VK_PIPELINE_STAGE_TRANSFER_BIT, // srcStageMask
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // dstStageMask
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, // dstStageMask
 			0, // no dependencyFlags
 			0, nullptr, // memory barrier count, pointer (no memory barriers)
 			0, nullptr, // buffer memory barrier count, pointer (no buffer barriers)
@@ -383,7 +417,7 @@ void Helpers::transfer_to_image(void const *data, size_t size, AllocatedImage &t
 		vkCmdPipelineBarrier(
 			transfer_command_buffer,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			0, 0, nullptr, 0, nullptr, 1, &barrier
 		);
 	}

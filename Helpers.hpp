@@ -56,12 +56,14 @@ struct Helpers {
 	struct AllocatedImage {
 		VkImage handle = VK_NULL_HANDLE;
 		VkExtent2D extent{.width = 0, .height = 0};
+		uint32_t depth = 1;
 		VkFormat format = VK_FORMAT_UNDEFINED;
 		Allocation allocation;
 
 		//NOTE: could define default constructor, move constructor, move assignment, destructor for a bit more paranoia
 	};
 	AllocatedImage create_image(VkExtent2D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map = Unmapped, VkImageCreateFlags flags = 0, uint32_t arrayLayers = 1, uint32_t mipLevels = 1);
+	AllocatedImage create_image_3d(VkExtent3D const &extent, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, MapFlag map = Unmapped, uint32_t mipLevels = 1);
 	void destroy_image(AllocatedImage &&allocated_image);
 	
 
@@ -107,4 +109,3 @@ struct Helpers {
 	void create(); //create vulkan resources (after GPU-held handles are created)
 	void destroy(); //destroy vulkan resources (before GPU-held handles are destroyed)
 };
-
