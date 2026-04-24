@@ -1690,7 +1690,9 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 			.dstOffset = 0,
 			.size = needed_bytes,
 		};
-		vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
+		if (needed_bytes > 0) {
+			vkCmdCopyBuffer(workspace.command_buffer, workspace.lines_vertices_src.handle, workspace.lines_vertices.handle, 1, &copy_region);
+		}
 	}
 
 	{ // upload camera info:
@@ -1808,7 +1810,9 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				.dstOffset = 0,
 				.size = needed_bytes,
 			};
-			vkCmdCopyBuffer(workspace.command_buffer, workspace.Transforms_src.handle, workspace.Transforms.handle, 1, &copy_region);
+			if (needed_bytes > 0) {
+				vkCmdCopyBuffer(workspace.command_buffer, workspace.Transforms_src.handle, workspace.Transforms.handle, 1, &copy_region);
+			}
 		}
 
 		{ // upload lights
@@ -1941,7 +1945,9 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 				.dstOffset = 0,
 				.size = needed_bytes,
 			};
-			vkCmdCopyBuffer(workspace.command_buffer, workspace.Lights_src.handle, workspace.Lights.handle, 1, &copy_region);
+			if (needed_bytes > 0) {
+				vkCmdCopyBuffer(workspace.command_buffer, workspace.Lights_src.handle, workspace.Lights.handle, 1, &copy_region);
+			}
 		}
 	}
 
@@ -2280,9 +2286,13 @@ void Tutorial::render(RTG &rtg_, RTG::RenderParams const &render_params) {
 
 			// bind normal map at slot 5
 			S72::Material *material = inst.mesh->material;
-			VkDescriptorSet final_normal_map_descriptors = material->normal_map
-															   ? normal_map_descriptors[normal_index_map[material->normal_map]]
-															   : normal_map_descriptors[0];
+			VkDescriptorSet final_normal_map_descriptors = normal_map_descriptors[0];
+			if (material != nullptr && material->normal_map != nullptr) {
+				auto normal_it = normal_index_map.find(material->normal_map);
+				if (normal_it != normal_index_map.end()) {
+					final_normal_map_descriptors = normal_map_descriptors[normal_it->second];
+				}
+			}
 
 			vkCmdBindDescriptorSets(
 				workspace.command_buffer,
@@ -2654,18 +2664,20 @@ void Tutorial::update(float dt) {
 				}
 
 				ObjectsPipeline::MaterialType material_type = ObjectsPipeline::MaterialType::Lambertian;
-				float inst_roughness = 0.5f, inst_metalness = 0.0f;;
-				if (std::holds_alternative<S72::Material::PBR>(node->mesh->material->brdf)) { // returns true/false checks if a std::variant currently holds a specific alternative type
-					material_type = ObjectsPipeline::MaterialType::PBR;
-					auto const &pbr = std::get<S72::Material::PBR>(node->mesh->material->brdf); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
-					if (auto *roughness = std::get_if<float>(&pbr.roughness)) inst_roughness = *roughness;
-					if (auto *metalness = std::get_if<float>(&pbr.metalness)) inst_metalness = *metalness;
-				} else if (std::holds_alternative<S72::Material::Lambertian>(node->mesh->material->brdf)) {
-					material_type = ObjectsPipeline::MaterialType::Lambertian;
-				} else if (std::holds_alternative<S72::Material::Mirror>(node->mesh->material->brdf)) {
-					material_type = ObjectsPipeline::MaterialType::Mirror;
-				} else if (std::holds_alternative<S72::Material::Environment>(node->mesh->material->brdf)) {
-					material_type = ObjectsPipeline::MaterialType::Environment;
+				float inst_roughness = 0.5f, inst_metalness = 0.0f;
+				if (node->mesh->material != nullptr) {
+					if (std::holds_alternative<S72::Material::PBR>(node->mesh->material->brdf)) { // returns true/false checks if a std::variant currently holds a specific alternative type
+						material_type = ObjectsPipeline::MaterialType::PBR;
+						auto const &pbr = std::get<S72::Material::PBR>(node->mesh->material->brdf); // get_if returns a pointer to the value if it holds the type T, or nullptr if not
+						if (auto *roughness = std::get_if<float>(&pbr.roughness)) inst_roughness = *roughness;
+						if (auto *metalness = std::get_if<float>(&pbr.metalness)) inst_metalness = *metalness;
+					} else if (std::holds_alternative<S72::Material::Lambertian>(node->mesh->material->brdf)) {
+						material_type = ObjectsPipeline::MaterialType::Lambertian;
+					} else if (std::holds_alternative<S72::Material::Mirror>(node->mesh->material->brdf)) {
+						material_type = ObjectsPipeline::MaterialType::Mirror;
+					} else if (std::holds_alternative<S72::Material::Environment>(node->mesh->material->brdf)) {
+						material_type = ObjectsPipeline::MaterialType::Environment;
+					}
 				}
 
 				object_instances.emplace_back(ObjectInstance{
