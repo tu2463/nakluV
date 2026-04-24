@@ -234,7 +234,7 @@ float shadow_pcf(int shadow_i, mat4 clip_from_world, float map_size) {
     float current_depth = frag_light_ndc.z; // current fragment depth in light space [0,1]
 
     float texel_size = 1.0 / map_size;
-    const float bias = 0.005;
+    const float bias = 0.0001;
     const float sample_cnt = 9.0;
 
     // Credit: PCF, shadow acne from https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping
