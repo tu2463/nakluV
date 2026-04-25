@@ -3081,6 +3081,7 @@ void Tutorial::update(float dt) {
 	}
 
 	lines_vertices.clear();
+	float current_farclip = free_camera.far;
 	if (camera_mode == CameraMode::Scene) {
 		// the rendering happens through one of the cameras in the scene graph and the user cannot change the camera transformation
 		if (scene_camera_instances.empty()) {
