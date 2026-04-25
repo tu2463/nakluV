@@ -392,6 +392,8 @@ struct S72 {
         {   
             // e.g file_bbox_max: [511, 63, 511] file_bbox_min: [0, 0, 0]
             int nx = 0, ny = 0, nz = 0;
+            vec3 bbox_min = vec3{.x = 0.0f, .y = 0.0f, .z = 0.0f}; // used for drawing bounding box for debug
+            vec3 bbox_max = vec3{.x = 0.0f, .y = 0.0f, .z = 0.0f};
             std::vector<float> values; // flat [z][y][x] row-major
         };
         GridData dimensional_profile;

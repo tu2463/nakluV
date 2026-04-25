@@ -1218,6 +1218,16 @@ void S72::process_clouds() {
 			data.nx = dim.x();
 			data.ny = dim.y();
 			data.nz = dim.z();
+			data.bbox_min = S72::vec3{
+				.x = float(bbox.min().x()),
+				.y = float(bbox.min().y()),
+				.z = float(bbox.min().z()),
+			};
+			data.bbox_max = S72::vec3{
+				.x = float(bbox.max().x() + 1),
+				.y = float(bbox.max().y() + 1),
+				.z = float(bbox.max().z() + 1),
+			};
 
 			size_t const count = size_t(data.nx) * size_t(data.ny) * size_t(data.nz);
 			data.values.assign(count, 0.0f);

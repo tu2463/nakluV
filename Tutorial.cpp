@@ -2731,6 +2731,7 @@ void Tutorial::update(float dt) {
 		object_instances.clear();
 		scene_camera_instances.clear();
 		light_instances.clear();
+		cloud_instances.clear();
 
 		// 1. traverse the scene graph from root; "roots" is an optional array of references to nodes at which to start drawing the scene.
 
@@ -2895,6 +2896,13 @@ void Tutorial::update(float dt) {
 			if (node->light != nullptr) {
 				light_instances.emplace_back(Light{
 					.light = node->light,
+					.WORLD_FROM_LOCAL = world,
+				});
+			}
+
+			if (node->cloud != nullptr) {
+				cloud_instances.emplace_back(CloudInstance{
+					.cloud = node->cloud,
 					.WORLD_FROM_LOCAL = world,
 				});
 			}
@@ -3076,6 +3084,71 @@ void Tutorial::update(float dt) {
 	else
 	{
 		assert(0 && "only three camera modes");
+	}
+
+	auto draw_box_edges = [&](vec3 c000, vec3 c001, vec3 c010, vec3 c011,
+	                          vec3 c100, vec3 c101, vec3 c110, vec3 c111,
+	                          uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+		push_edge(c000, c100, r,g,b,a, r,g,b,a);
+		push_edge(c100, c110, r,g,b,a, r,g,b,a);
+		push_edge(c110, c010, r,g,b,a, r,g,b,a);
+		push_edge(c010, c000, r,g,b,a, r,g,b,a);
+		push_edge(c001, c101, r,g,b,a, r,g,b,a);
+		push_edge(c101, c111, r,g,b,a, r,g,b,a);
+		push_edge(c111, c011, r,g,b,a, r,g,b,a);
+		push_edge(c011, c001, r,g,b,a, r,g,b,a);
+		push_edge(c000, c001, r,g,b,a, r,g,b,a);
+		push_edge(c100, c101, r,g,b,a, r,g,b,a);
+		push_edge(c110, c111, r,g,b,a, r,g,b,a);
+		push_edge(c010, c011, r,g,b,a, r,g,b,a);
+	};
+
+	for (CloudInstance const &inst : cloud_instances) {
+		if (inst.cloud == nullptr) continue;
+
+		S72::Cloud::GridData const &grid = inst.cloud->density_scale;
+		if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0) continue;
+
+		S72::vec3 const &bmin = grid.bbox_min;
+		S72::vec3 const &bmax = grid.bbox_max;
+
+		auto local_to_world = [&](float lx, float ly, float lz) -> vec3 {
+			vec4 local = {lx, ly, lz, 1.0f};
+			vec4 world_pt = inst.WORLD_FROM_LOCAL * local;
+			return vec3{world_pt[0], world_pt[1], world_pt[2]};
+		};
+
+		vec3 c000 = local_to_world(bmin.x, bmin.y, bmin.z);
+		vec3 c001 = local_to_world(bmin.x, bmin.y, bmax.z);
+		vec3 c010 = local_to_world(bmin.x, bmax.y, bmin.z);
+		vec3 c011 = local_to_world(bmin.x, bmax.y, bmax.z);
+		vec3 c100 = local_to_world(bmax.x, bmin.y, bmin.z);
+		vec3 c101 = local_to_world(bmax.x, bmin.y, bmax.z);
+		vec3 c110 = local_to_world(bmax.x, bmax.y, bmin.z);
+		vec3 c111 = local_to_world(bmax.x, bmax.y, bmax.z);
+
+		vec3 world_min = c000;
+		vec3 world_max = c000;
+		for (vec3 const &corner : {c001, c010, c011, c100, c101, c110, c111}) {
+			world_min[0] = std::min(world_min[0], corner[0]);
+			world_min[1] = std::min(world_min[1], corner[1]);
+			world_min[2] = std::min(world_min[2], corner[2]);
+			world_max[0] = std::max(world_max[0], corner[0]);
+			world_max[1] = std::max(world_max[1], corner[1]);
+			world_max[2] = std::max(world_max[2], corner[2]);
+		}
+
+		vec3 a000 = {world_min[0], world_min[1], world_min[2]};
+		vec3 a001 = {world_min[0], world_min[1], world_max[2]};
+		vec3 a010 = {world_min[0], world_max[1], world_min[2]};
+		vec3 a011 = {world_min[0], world_max[1], world_max[2]};
+		vec3 a100 = {world_max[0], world_min[1], world_min[2]};
+		vec3 a101 = {world_max[0], world_min[1], world_max[2]};
+		vec3 a110 = {world_max[0], world_max[1], world_min[2]};
+		vec3 a111 = {world_max[0], world_max[1], world_max[2]};
+
+		draw_box_edges(a000, a001, a010, a011, a100, a101, a110, a111,
+		               0xff, 0x7f, 0x00, 0xff);
 	}
 
 	{ // static sun and sky

@@ -425,6 +425,12 @@ struct Tutorial : RTG::Application {
 	std::vector < Light > light_instances; // at every frame, will transfer Light to LightData and pass to frag shader when creating SSBO
 	static constexpr float SHADOW_DEFAULT_FAR_LIMIT = 1000.0f; // fallback far plane for spot lights with no limit
 
+	struct CloudInstance {
+		S72::Cloud *cloud;
+		mat4 WORLD_FROM_LOCAL;
+	};
+	std::vector< CloudInstance > cloud_instances;
+
 	// -- objects --
 	std::vector< LinesPipeline::Vertex > lines_vertices;
 
