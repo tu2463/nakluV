@@ -1130,10 +1130,10 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				uint32_t cloud_index = uint32_t(cloud_textures.size());
 				cloud_index_map[&cloud] = cloud_index;
 
-				CloudData gpu_cloud;
-				gpu_cloud.dimensional_profile = upload_cloud_channel(cloud, "dimensional_profile", cloud.dimensional_profile);
-				gpu_cloud.detail_type = upload_cloud_channel(cloud, "detail_type", cloud.detail_type);
-				gpu_cloud.density_scale = upload_cloud_channel(cloud, "density_scale", cloud.density_scale);
+				CloudTextureData cloud_texture;
+				cloud_texture.dimensional_profile = upload_cloud_channel(cloud, "dimensional_profile", cloud.dimensional_profile);
+				cloud_texture.detail_type = upload_cloud_channel(cloud, "detail_type", cloud.detail_type);
+				cloud_texture.density_scale = upload_cloud_channel(cloud, "density_scale", cloud.density_scale);
 
 				VkDescriptorSetAllocateInfo alloc_info{
 					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -1141,22 +1141,22 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 					.descriptorSetCount = 1,
 					.pSetLayouts = &cloud_descriptor_set_layout,
 				};
-				VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &gpu_cloud.descriptors));
+				VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &cloud_texture.descriptors));
 
 				std::array<VkDescriptorImageInfo, 3> image_infos{
 					VkDescriptorImageInfo{
 						.sampler = cloud_sampler,
-						.imageView = gpu_cloud.dimensional_profile.view,
+						.imageView = cloud_texture.dimensional_profile.view,
 						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 					},
 					VkDescriptorImageInfo{
 						.sampler = cloud_sampler,
-						.imageView = gpu_cloud.detail_type.view,
+						.imageView = cloud_texture.detail_type.view,
 						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 					},
 					VkDescriptorImageInfo{
 						.sampler = cloud_sampler,
-						.imageView = gpu_cloud.density_scale.view,
+						.imageView = cloud_texture.density_scale.view,
 						.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 					},
 				};
@@ -1164,7 +1164,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				for (uint32_t binding = 0; binding < uint32_t(writes.size()); ++binding) {
 					writes[binding] = VkWriteDescriptorSet{
 						.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-						.dstSet = gpu_cloud.descriptors,
+						.dstSet = cloud_texture.descriptors,
 						.dstBinding = binding,
 						.dstArrayElement = 0,
 						.descriptorCount = 1,
@@ -1174,7 +1174,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				}
 				vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 
-				cloud_textures.emplace_back(std::move(gpu_cloud));
+				cloud_textures.emplace_back(std::move(cloud_texture));
 				std::cout << "Created GPU cloud textures for: " << name << std::endl;
 			}
 		}
@@ -1211,10 +1211,10 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			};
 			// has 4 channels: channel name is given by vdb_print NubisVoxelCloudNoise.vdb
 			std::array<NoiseChannel, 4> noise_channels{{
-				{"lf_perlin_worley", "R"},
-				{"hf_perlin_worley", "G"},
-				{"mf_worley", "B"},
-				{"hf_worley", "A"},
+				{"lf_curly_worley", "R"},
+				{"hf_curly_worley", "G"},
+				{"lf_alligator", "B"},
+				{"hf_alligator", "A"},
 			}};
 
 			// dimensions of the noise vdb grid's active voxel bounding box:
@@ -1582,7 +1582,7 @@ Tutorial::~Tutorial() {
 	if (cloud_descriptor_pool) {
 		vkDestroyDescriptorPool(rtg.device, cloud_descriptor_pool, nullptr);
 		cloud_descriptor_pool = VK_NULL_HANDLE;
-		for (CloudData &cloud : cloud_textures) {
+		for (CloudTextureData &cloud : cloud_textures) {
 			cloud.descriptors = VK_NULL_HANDLE;
 		}
 	}
@@ -1613,7 +1613,7 @@ Tutorial::~Tutorial() {
 		rtg.helpers.destroy_image(std::move(channel.image));
 	};
 
-	for (CloudData &cloud : cloud_textures) {
+	for (CloudTextureData &cloud : cloud_textures) {
 		destroy_cloud_channel(cloud.dimensional_profile);
 		destroy_cloud_channel(cloud.detail_type);
 		destroy_cloud_channel(cloud.density_scale);
@@ -3107,6 +3107,7 @@ void Tutorial::update(float dt) {
 				.near_plane = -projection.near,
 				.far_plane = -projection.far,
 			};
+			current_farclip = projection.far;
 
 			// p_world = WORLD_FROM_LOCAL * p_camera
 			// p_camera = CAMERA_FROM_WORLD * p_world
@@ -3138,6 +3139,7 @@ void Tutorial::update(float dt) {
 			.near_plane = -free_camera.near,
 			.far_plane = -free_camera.far,
 		};
+		current_farclip = free_camera.far;
 
 		CLIP_FROM_WORLD_CULLING = CLIP_FROM_WORLD;
 
@@ -3159,6 +3161,7 @@ void Tutorial::update(float dt) {
 			debug_camera.near,
 			debug_camera.far
 		) * CAMERA_FROM_WORLD;
+		current_farclip = debug_camera.far;
 
 		mat4 WORLD_FROM_LOCAL = inverse(CAMERA_FROM_WORLD);
 		world.EYE.x = WORLD_FROM_LOCAL[12];
@@ -3333,6 +3336,37 @@ void Tutorial::update(float dt) {
 		world.SUN_ENERGY.r = 1.0f;
 		world.SUN_ENERGY.g = 1.0f;
 		world.SUN_ENERGY.b = 0.9f;
+	}
+
+	if (!cloud_instances.empty()) {
+		CloudInstance const &inst = cloud_instances.front();
+		mat4 local_from_world = inverse(inst.WORLD_FROM_LOCAL); // mat4 is stored in column-major order, so (c, r)'s index =  4c+r
+		for (int c = 0; c < 4; ++c) {
+			for (int r = 0; r < 4; ++r) {
+				cloud_params.LOCAL_FROM_WORLD[c][r] = local_from_world[c * 4 + r];
+			}
+		}
+
+		cloud_params.sun_direction = glm::vec3(
+			world.SUN_DIRECTION.x,
+			world.SUN_DIRECTION.y,
+			world.SUN_DIRECTION.z
+		);
+		cloud_params.farclip = current_farclip;
+		cloud_params.sun_color = glm::vec3(
+			world.SUN_ENERGY.r,
+			world.SUN_ENERGY.g,
+			world.SUN_ENERGY.b
+		);
+		cloud_params.transmittance_limit = 0.01f;
+		cloud_params.animate_speed = 1.0f;
+		cloud_params.cloud_type = CloudType::ParkouringCloud;
+		if (inst.cloud != nullptr
+		 && inst.cloud->src.find("Stormbird") != std::string::npos) {
+			cloud_params.cloud_type = CloudType::StormbirdCloud;
+		}
+		cloud_params.tiling_freq = 1.0f;
+		cloud_params._pad = 0.0f;
 	}
 }
 

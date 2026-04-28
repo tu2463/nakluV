@@ -7,6 +7,8 @@
 #include "RTG.hpp"
 #include "S72.hpp"
 
+#include <glm/glm.hpp>
+
 struct Tutorial : RTG::Application {
 
 	Tutorial(RTG &, S72 &);
@@ -267,12 +269,29 @@ struct Tutorial : RTG::Application {
 	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
 
 	// -- Final: cloud rendering
+	enum class CloudType {
+		ParkouringCloud = 0,
+		StormbirdCloud = 1,
+	};
+
+	struct CloudParams { // Reference: the UIControlBufferObject struct from https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova
+		glm::mat4 LOCAL_FROM_WORLD; // cloud's VDB textures are defined in the cloud's local space
+		glm::vec3 sun_direction;
+		float farclip; // The cloud ray-marching shader needs to know how far to march along each view ray before giving up i.e. 沿视线方向最远走多远. This is bounded by the camera's far plane distance.
+		glm::vec3 sun_color;
+		float transmittance_limit; // 透射率limit；Ray marching accumulates transmittance as it steps through the cloud. T starts at 1 (fully transparent) and decreases as the cloud occludes more light. Once < 0.01, the cloud is visually opaque, so can terminate early.
+		float animate_speed; // Final-TODO: do we need it?
+		CloudType cloud_type; // 0 = ParkouringCloud, 1 = StormbirdCloud
+		float tiling_freq; // how the noise texture tiles
+		float _pad;
+	};
+
 	struct CloudChannelTexture {
 		Helpers::AllocatedImage image;
 		VkImageView view = VK_NULL_HANDLE;
 	};
 
-	struct CloudData {
+	struct CloudTextureData {
 		CloudChannelTexture dimensional_profile;
 		CloudChannelTexture detail_type;
 		CloudChannelTexture density_scale;
@@ -282,12 +301,14 @@ struct Tutorial : RTG::Application {
 	VkDescriptorSetLayout cloud_descriptor_set_layout = VK_NULL_HANDLE; // bindings 0, 1, 2 = Nubis VDB float grids
 	VkDescriptorPool cloud_descriptor_pool = VK_NULL_HANDLE;
 	VkSampler cloud_sampler = VK_NULL_HANDLE;
-	std::vector< CloudData > cloud_textures;
+	std::vector< CloudTextureData > cloud_textures;
 	std::unordered_map< S72::Cloud*, uint32_t > cloud_index_map;
 	Helpers::AllocatedImage cloud_noise_image;
 	VkImageView cloud_noise_view = VK_NULL_HANDLE;
 	// Nubis Noise: 2 Bytes / Texel. Credit: p23 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
-	VkFormat cloud_noise_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	// but noise data at noise_values is loaded as float (32-bit), so use R32G32B32A32_SFLOAT
+	VkFormat cloud_noise_format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	CloudParams cloud_params = {};
 
 	// A2-pbr: BRDF split-sum LUT (precomputed 2D texture, stored as brdf_lut.bin)
 	Helpers::AllocatedImage brdf_lut_image;
@@ -421,6 +442,8 @@ struct Tutorial : RTG::Application {
 	mat4 CLIP_FROM_WORLD;
 	mat4 CLIP_FROM_WORLD_CULLING;  // the culling frustum matrix  
   	mat4 CAMERA_FROM_WORLD; // for transforming object positions into camera space for culling
+
+	float current_farclip = free_camera.far; // A3-cloud, captures the far clip plane distance of whichever camera is actively rendering, passed to cloud_params.farclip, so the cloud rendering shader knows the far plane distance for the active rendering camera
 
 	// -- lights -- 
 	struct Light {
