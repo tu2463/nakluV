@@ -7,6 +7,10 @@
 #include "stb_image.h"
 
 #include <GLFW/glfw3.h>
+#include <openvdb/openvdb.h>
+#include <openvdb/io/File.h>
+#include <openvdb/math/Coord.h>
+#include <openvdb/Grid.h>
 #include <glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
@@ -16,8 +20,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 #include <random>
 #include <algorithm>
@@ -1174,6 +1180,154 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
+	{ // Final project: upload Nubis detail noise VDB as one RGBA32F 3D texture.
+		// Credit: p23 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+		// Nubis Noise: 128 x 128 x 128 Voxels, Uncompressed, 2 Bytes / Texel, 4.194 Megabytes
+		if (!s72.clouds.empty()) {
+			namespace fs = std::filesystem;
+
+			fs::path noise_path;
+			for (auto const &[name, cloud] : s72.clouds) {
+				if (!cloud.path.empty()) {
+					fs::path candidate = fs::path(cloud.path).parent_path() / "NubisVoxelCloudNoise.vdb";
+					if (fs::exists(candidate)) {
+						noise_path = candidate;
+						break;
+					}
+				}
+			}
+			if (noise_path.empty()) {
+				throw std::runtime_error("Could not find NubisVoxelCloudNoise.vdb.");
+			}
+
+			openvdb::initialize();
+			openvdb::io::File file(noise_path.string());
+			file.open();
+
+			// each grid holds one channel of the noise texture. each active voxel stores a float value (openvdb::FloatGrid)
+			struct NoiseChannel {
+				char const *grid_name;
+				char const *channel_name;
+			};
+			// has 4 channels: channel name is given by vdb_print NubisVoxelCloudNoise.vdb
+			std::array<NoiseChannel, 4> noise_channels{{
+				{"lf_perlin_worley", "R"},
+				{"hf_perlin_worley", "G"},
+				{"mf_worley", "B"},
+				{"hf_worley", "A"},
+			}};
+
+			// dimensions of the noise vdb grid's active voxel bounding box:
+			int nx = 0;
+			int ny = 0;
+			int nz = 0;
+			openvdb::CoordBBox reference_bbox; // Credit: https://www.openvdb.org/documentation/doxygen/classopenvdb_1_1v13__0_1_1math_1_1CoordBBox.html
+			std::vector<float> noise_values;
+
+			// just for logging:
+			float min_value = std::numeric_limits<float>::max();
+			float max_value = -std::numeric_limits<float>::max();
+
+			for (uint32_t channel = 0; channel < uint32_t(noise_channels.size()); ++channel) {
+				// Credit: GridBase @ https://www.openvdb.org/documentation/doxygen/classopenvdb_1_1v13__0_1_1GridBase.html, 
+				openvdb::GridBase::Ptr base = file.readGrid(noise_channels[channel].grid_name); // read the entire grid. Credit: https://www.openvdb.org/documentation/doxygen/classopenvdb_1_1v13__0_1_1io_1_1File.html
+				openvdb::FloatGrid::Ptr grid = openvdb::gridPtrCast<openvdb::FloatGrid>(base); // Cast a generic grid pointer to a pointer to a grid of a concrete class. Credit: https://www.openvdb.org/documentation/doxygen/Grid_8h.html
+				if (!grid) {
+					throw std::runtime_error("Noise VDB grid \"" + std::string(noise_channels[channel].grid_name) + "\" is missing or is not a FloatGrid.");
+				}
+
+				openvdb::CoordBBox bbox;
+				if (!grid->tree().evalActiveVoxelBoundingBox(bbox)) { // populates bbox with the axis-aligned bounding box of all active voxels. Credit: https://www.openvdb.org/documentation/doxygen/Grid_8h_source.html
+					throw std::runtime_error("Noise VDB grid \"" + std::string(noise_channels[channel].grid_name) + "\" has no active voxels.");
+				}
+
+				openvdb::Coord dim = bbox.dim(); // Return the dimensions of the coordinates spanned by this bounding box. Credit: https://www.openvdb.org/documentation/doxygen/classopenvdb_1_1v13__0_1_1math_1_1CoordBBox.html
+				if (channel == 0) { // use channel 0 to set the reference dimensions for all channels
+					reference_bbox = bbox;
+					nx = dim.x();
+					ny = dim.y();
+					nz = dim.z();
+					noise_values.assign(size_t(nx) * size_t(ny) * size_t(nz) * noise_channels.size(), 0.0f); // filled with 0.0f
+				} else if (dim.x() != nx || dim.y() != ny || dim.z() != nz || bbox.min() != reference_bbox.min()) {
+					// after the first channel, validate that all channels have the same dimensions and bounding box
+					throw std::runtime_error("Noise VDB grid \"" + std::string(noise_channels[channel].grid_name) + "\" dimensions do not match the first channel.");
+				}
+
+				auto accessor = grid->getConstAccessor(); // creates a read-only accessor object for the grid. It caches the last accessed tree node internally, so repeated nearby voxel lookups are faster (avoids re-traversing the tree from the root each time).
+				for (int z = 0; z < nz; ++z) {
+					for (int y = 0; y < ny; ++y) {
+						for (int x = 0; x < nx; ++x) {
+							openvdb::Coord coord( // Signed (x, y, z) 32-bit integer coordinates. Credit: https://www.openvdb.org/documentation/doxygen/classopenvdb_1_1v13__0_1_1Coord.html
+								bbox.min().x() + x,
+								bbox.min().y() + y,
+								bbox.min().z() + z
+							);
+							float value = accessor.getValue(coord); // looks up the float value stored at voxel coordinate coord
+							/*
+							( z*ny*nx + y*nx + x ) * num_channels + channel
+							(0,0,0): 
+								channel = 0(R) => i = 0
+								channel = 1(G) => i = 1
+								channel = 2(B) => i = 2
+								channel = 3(A) => i = 3
+							(1,0,0): channel = 0 => i = (0×4 + 0×2 + 1)×4 + 0 = 4
+							(0,1,0): channel = 0 => i = (0×4 + 1×2 + 0)×4 + 0 = 8
+							(0,0,1): channel = 0 => i = (1×4 + 0×2 + 0)×4 + 0 = 16
+							*/
+							size_t i = (size_t(z) * size_t(ny) * size_t(nx) + size_t(y) * size_t(nx) + size_t(x)) * noise_channels.size() + channel;
+							noise_values[i] = value;
+							min_value = std::min(min_value, value);
+							max_value = std::max(max_value, value);
+						}
+					}
+				}
+
+				std::cout << "  Loaded noise channel " << noise_channels[channel].channel_name
+					<< " from grid " << noise_channels[channel].grid_name << std::endl;
+			}
+
+			file.close();
+
+			cloud_noise_image = rtg.helpers.create_image_3d(
+				VkExtent3D{
+					.width = uint32_t(nx),
+					.height = uint32_t(ny),
+					.depth = uint32_t(nz),
+				},
+				cloud_noise_format,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // GPU side only
+				Helpers::Unmapped
+			);
+			rtg.helpers.transfer_to_image(
+				noise_values.data(),
+				noise_values.size() * sizeof(noise_values[0]),
+				cloud_noise_image
+			);
+
+			VkImageViewCreateInfo view_info{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.image = cloud_noise_image.handle,
+				.viewType = VK_IMAGE_VIEW_TYPE_3D,
+				.format = cloud_noise_image.format,
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1,
+				},
+			};
+			VK(vkCreateImageView(rtg.device, &view_info, nullptr, &cloud_noise_view));
+
+			std::cout << "Created GPU cloud noise texture from " << noise_path.string()
+				<< ": " << nx << "x" << ny << "x" << nz
+				<< " RGBA32F, value range [" << min_value << ", " << max_value << "]"
+				<< std::endl;
+		}
+	}
+
 	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
 		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
 			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
@@ -1441,6 +1595,14 @@ Tutorial::~Tutorial() {
 	if (cloud_sampler) {
 		vkDestroySampler(rtg.device, cloud_sampler, nullptr);
 		cloud_sampler = VK_NULL_HANDLE;
+	}
+
+	if (cloud_noise_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, cloud_noise_view, nullptr);
+		cloud_noise_view = VK_NULL_HANDLE;
+	}
+	if (cloud_noise_image.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_image(std::move(cloud_noise_image));
 	}
 
 	auto destroy_cloud_channel = [&](CloudChannelTexture &channel) {

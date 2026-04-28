@@ -385,7 +385,7 @@ struct S72 {
         std::string name;
         std::string src; // src used in the s72 file
         
-        std::string path; ////computed during loading, path to VDB file, taking into account path to s72 file // Final-TODO: add an example to demonstarte src vs path
+        std::string path; // computed during loading, path to VDB file, taking into account path to s72 file // Final-TODO: add an example to demonstarte src vs path
 
         // VDB data
         struct GridData

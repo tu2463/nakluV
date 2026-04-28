@@ -266,6 +266,7 @@ struct Tutorial : RTG::Application {
 	std::vector< VkDescriptorSet>  normal_map_descriptors;
 	std::unordered_map< S72::Texture*, uint32_t > normal_index_map; // maps S72 normal map pointers to normal map indices
 
+	// -- Final: cloud rendering
 	struct CloudChannelTexture {
 		Helpers::AllocatedImage image;
 		VkImageView view = VK_NULL_HANDLE;
@@ -283,6 +284,10 @@ struct Tutorial : RTG::Application {
 	VkSampler cloud_sampler = VK_NULL_HANDLE;
 	std::vector< CloudData > cloud_textures;
 	std::unordered_map< S72::Cloud*, uint32_t > cloud_index_map;
+	Helpers::AllocatedImage cloud_noise_image;
+	VkImageView cloud_noise_view = VK_NULL_HANDLE;
+	// Nubis Noise: 2 Bytes / Texel. Credit: p23 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+	VkFormat cloud_noise_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
 	// A2-pbr: BRDF split-sum LUT (precomputed 2D texture, stored as brdf_lut.bin)
 	Helpers::AllocatedImage brdf_lut_image;
