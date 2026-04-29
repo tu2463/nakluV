@@ -1059,7 +1059,7 @@ S72 S72::load(std::string const &scene_file) {
 	}
 
 	for (auto &[key, value] : s72.clouds) {
-		value.path = scene_folder + value.src; // ../example_scene/clouds/nubis_cloud1.vdb
+		value.path = scene_folder + value.src;
 	}
 
     // load the DataFiles from disk in binary mode // Credit: Zulip discussions https://15-472-s26.zulipchat.com/#narrow/channel/560762-C.2B.2B/topic/Reading.20A.20File/with/572892122

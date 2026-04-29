@@ -194,6 +194,16 @@ struct Tutorial : RTG::Application {
 		void destroy(RTG &);
 	} shadow_pipeline;
 
+	struct LightGridPipeline {
+		VkPipeline handle = VK_NULL_HANDLE;
+		VkPipelineLayout layout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set0_LightGridImage = VK_NULL_HANDLE; // storage image, for the light grid precomputation results
+		VkDescriptorSetLayout set1_CloudNVDF = VK_NULL_HANDLE; // 3 bindings for dimensional_profile, detail_type, density_scale
+		VkDescriptorSetLayout set2_Params = VK_NULL_HANDLE; // cloud params
+		void create(RTG &);
+		void destroy(RTG &);
+	} light_grid_pipeline;
+
 	//pools from which per-workspace things are allocated:
 	VkCommandPool command_pool = VK_NULL_HANDLE;
 	VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
@@ -309,6 +319,14 @@ struct Tutorial : RTG::Application {
 	// but noise data at noise_values is loaded as float (32-bit), so use R32G32B32A32_SFLOAT
 	VkFormat cloud_noise_format = VK_FORMAT_R32G32B32A32_SFLOAT;
 	CloudParams cloud_params = {};
+
+	Helpers::AllocatedImage light_grid_image;
+	VkImageView light_grid_view = VK_NULL_HANDLE;
+	VkSampler light_grid_sampler = VK_NULL_HANDLE;
+	VkDescriptorSet light_grid_storage_descriptors = VK_NULL_HANDLE;
+	VkDescriptorSet light_grid_sample_descriptors = VK_NULL_HANDLE;
+	VkDescriptorPool light_grid_descriptor_pool = VK_NULL_HANDLE;
+	VkDescriptorSetLayout light_grid_sample_descriptor_set_layout = VK_NULL_HANDLE;
 
 	// A2-pbr: BRDF split-sum LUT (precomputed 2D texture, stored as brdf_lut.bin)
 	Helpers::AllocatedImage brdf_lut_image;

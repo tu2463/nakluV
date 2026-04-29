@@ -133,7 +133,11 @@ void CubePipeline::create(RTG &rtg, Mode mode) {
     { // create compute pipeline
         VkComputePipelineCreateInfo create_info{
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+
+            // allows dispatch from a non-zero base invocation ID e.g. (baseX, baseY, baseZ)
+            // need this kind of base offset to determine which face the sahder is working on. 
             .flags = VK_PIPELINE_CREATE_DISPATCH_BASE,
+            
             .layout = layout,
             .stage = VkPipelineShaderStageCreateInfo{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, // this is a compute shader (not vertex/fragment)

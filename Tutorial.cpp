@@ -172,6 +172,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	background_pipeline.create(rtg, render_pass, 0);
 	lines_pipeline.create(rtg, render_pass, 0);
 	objects_pipeline.create(rtg, render_pass, 0);
+	light_grid_pipeline.create(rtg);
 
 	{ // create descriptor tool:
 		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
@@ -213,7 +214,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		// if no shadow lights, use a minimal 1x1 image so descriptors are always valid
 		if (shadow_count == 0) shadow_resolution = 1;
 
-		VkSamplerCreateInfo sampler_info{
+		VkSamplerCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 			.magFilter = VK_FILTER_LINEAR,
 			.minFilter = VK_FILTER_LINEAR, // Use linear filtering for magnification & minification (smoother)
@@ -233,7 +234,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			// Border color 是当 addressMode = CLAMP_TO_BORDER 时，UV 超出 [0,1] 范围返回的固定颜色值。  对 shadow sampler，这个值被当作深度值（取 R = 1.0 或 0.0）参与比较，而不是颜色。
 			.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE, // A3-shadows-?? outside light frustum = lit (no shadow)
 		};
-		VK( vkCreateSampler(rtg.device, &sampler_info, nullptr, &shadow_sampler) );
+		VK( vkCreateSampler(rtg.device, &create_info, nullptr, &shadow_sampler) );
 	}
 
 	{ // A3-shadows: create depth-only shadow render pass
@@ -414,21 +415,21 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			}
 
 			// bind the array image to set1 binding 2
-			VkDescriptorImageInfo shadow_image_info{
+			VkDescriptorImageInfo image_info{
 				.sampler = shadow_sampler,
 				.imageView = workspace.shadow_image_view,
 				.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
 			};
-			VkWriteDescriptorSet shadow_write{
+			VkWriteDescriptorSet write{
 				.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 				.dstSet = workspace.TransformsLights_descriptors,
 				.dstBinding = 2,
 				.dstArrayElement = 0,
 				.descriptorCount = 1,
 				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.pImageInfo = &shadow_image_info,
+				.pImageInfo = &image_info,
 			};
-			vkUpdateDescriptorSets(rtg.device, 1, &shadow_write, 0, nullptr);
+			vkUpdateDescriptorSets(rtg.device, 1, &write, 0, nullptr);
 		}
 
 		{ // A3-shadows: create single-layer views for each light and framebuffers for the shadow render pass
@@ -827,7 +828,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			.flags = 0,
 			.magFilter = VK_FILTER_LINEAR, // Use linear filtering for magnification (smoother)
 			.minFilter = VK_FILTER_LINEAR, // Use linear filtering for minification (smoother)
-			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST, // When selecting between mipmap levels, snap to the nearest level rather than blending between two.
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST, // no mipmap for texture now; if mipmp level > 0, when selecting between mipmap levels, snap to the nearest level rather than blending between two.
 			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
 			.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT, // When texture coordinates go outside [0, 1], the texture repeats (tiles). Other options include clamping or mirroring.
@@ -1052,7 +1053,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			};
 			VK(vkCreateDescriptorSetLayout(rtg.device, &layout_info, nullptr, &cloud_descriptor_set_layout));
 
-			VkSamplerCreateInfo sampler_info{
+			VkSamplerCreateInfo create_info{
 				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
 				.magFilter = VK_FILTER_LINEAR,
 				.minFilter = VK_FILTER_LINEAR,
@@ -1070,7 +1071,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
 				.unnormalizedCoordinates = VK_FALSE,
 			};
-			VK(vkCreateSampler(rtg.device, &sampler_info, nullptr, &cloud_sampler));
+			VK(vkCreateSampler(rtg.device, &create_info, nullptr, &cloud_sampler));
 
 			VkDescriptorPoolSize pool_size{
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1209,7 +1210,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				char const *grid_name;
 				char const *channel_name;
 			};
-			// has 4 channels: channel name is given by vdb_print NubisVoxelCloudNoise.vdb
+			// has 4 channels: channel name is given by vdb_print NubisVoxelCloudNoise.vdb; order is an arbitrary choice here
 			std::array<NoiseChannel, 4> noise_channels{{
 				{"lf_curly_worley", "R"},
 				{"hf_curly_worley", "G"},
@@ -1325,6 +1326,143 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				<< ": " << nx << "x" << ny << "x" << nz
 				<< " RGBA32F, value range [" << min_value << ", " << max_value << "]"
 				<< std::endl;
+		}
+	}
+
+	{ // Final project: create light-grid 3D storage image for cloud lighting.
+		if (!s72.clouds.empty()) {
+			light_grid_image = rtg.helpers.create_image_3d(
+				VkExtent3D{ // Credit: the size used by https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova
+					.width = 256,
+					.height = 256,
+					.depth = 32,
+				},
+				VK_FORMAT_R32G32B32A32_SFLOAT,
+				VK_IMAGE_TILING_OPTIMAL,
+				VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				Helpers::Unmapped
+			);
+			rtg.helpers.transfer_to_image(
+				nullptr,
+				0,
+				light_grid_image,
+				1,
+				VK_IMAGE_LAYOUT_GENERAL
+			);
+
+			VkImageViewCreateInfo view_info{
+				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+				.image = light_grid_image.handle,
+				.viewType = VK_IMAGE_VIEW_TYPE_3D,
+				.format = light_grid_image.format,
+				.subresourceRange{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1,
+				},
+			};
+			VK(vkCreateImageView(rtg.device, &view_info, nullptr, &light_grid_view));
+
+			VkSamplerCreateInfo create_info{
+				.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+				.magFilter = VK_FILTER_LINEAR,
+				.minFilter = VK_FILTER_LINEAR,
+				.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+				.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+				.minLod = 0.0f,
+				.maxLod = 0.0f,
+			};
+			VK(vkCreateSampler(rtg.device, &create_info, nullptr, &light_grid_sampler));
+
+			{ // layout for sampling the light grid in later cloud compute passes. Final-TODO: move to a consume pass pipeline file.
+				std::array<VkDescriptorSetLayoutBinding, 1> bindings{
+					VkDescriptorSetLayoutBinding{
+						.binding = 0,
+						.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+						.descriptorCount = 1,
+						.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+					},
+				};
+				VkDescriptorSetLayoutCreateInfo create_info{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+					.bindingCount = uint32_t(bindings.size()),
+					.pBindings = bindings.data(),
+				};
+				VK(vkCreateDescriptorSetLayout(rtg.device, &create_info, nullptr, &light_grid_sample_descriptor_set_layout));
+			}
+
+			std::array<VkDescriptorPoolSize, 2> pool_sizes{
+				VkDescriptorPoolSize{
+					.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+					.descriptorCount = 1,
+				},
+				VkDescriptorPoolSize{
+					.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.descriptorCount = 1,
+				},
+			};
+			VkDescriptorPoolCreateInfo pool_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+				.maxSets = 2,
+				.poolSizeCount = uint32_t(pool_sizes.size()),
+				.pPoolSizes = pool_sizes.data(),
+			};
+			VK(vkCreateDescriptorPool(rtg.device, &pool_info, nullptr, &light_grid_descriptor_pool));
+
+			{
+				VkDescriptorSetAllocateInfo alloc_info{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+					.descriptorPool = light_grid_descriptor_pool,
+					.descriptorSetCount = 1,
+					.pSetLayouts = &light_grid_pipeline.set0_LightGridImage,
+				};
+				VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &light_grid_storage_descriptors));
+			}
+			{
+				VkDescriptorSetAllocateInfo alloc_info{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+					.descriptorPool = light_grid_descriptor_pool,
+					.descriptorSetCount = 1,
+					.pSetLayouts = &light_grid_sample_descriptor_set_layout,
+				};
+				VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &light_grid_sample_descriptors));
+			}
+
+			VkDescriptorImageInfo storage_info{
+				.imageView = light_grid_view,
+				.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+			};
+			VkDescriptorImageInfo sample_info{
+				.sampler = light_grid_sampler,
+				.imageView = light_grid_view,
+				.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			};
+			std::array<VkWriteDescriptorSet, 2> writes{
+				VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = light_grid_storage_descriptors,
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+					.pImageInfo = &storage_info,
+				},
+				VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = light_grid_sample_descriptors,
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.pImageInfo = &sample_info,
+				},
+			};
+			vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
+
+			std::cout << "Created light grid image" << std::endl;
 		}
 	}
 
@@ -1597,6 +1735,28 @@ Tutorial::~Tutorial() {
 		cloud_sampler = VK_NULL_HANDLE;
 	}
 
+	if (light_grid_descriptor_pool != VK_NULL_HANDLE) {
+		vkDestroyDescriptorPool(rtg.device, light_grid_descriptor_pool, nullptr);
+		light_grid_descriptor_pool = VK_NULL_HANDLE;
+		light_grid_storage_descriptors = VK_NULL_HANDLE;
+		light_grid_sample_descriptors = VK_NULL_HANDLE;
+	}
+	if (light_grid_sample_descriptor_set_layout != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, light_grid_sample_descriptor_set_layout, nullptr);
+		light_grid_sample_descriptor_set_layout = VK_NULL_HANDLE;
+	}
+	if (light_grid_sampler != VK_NULL_HANDLE) {
+		vkDestroySampler(rtg.device, light_grid_sampler, nullptr);
+		light_grid_sampler = VK_NULL_HANDLE;
+	}
+	if (light_grid_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, light_grid_view, nullptr);
+		light_grid_view = VK_NULL_HANDLE;
+	}
+	if (light_grid_image.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_image(std::move(light_grid_image));
+	}
+
 	if (cloud_noise_view != VK_NULL_HANDLE) {
 		vkDestroyImageView(rtg.device, cloud_noise_view, nullptr);
 		cloud_noise_view = VK_NULL_HANDLE;
@@ -1769,6 +1929,7 @@ Tutorial::~Tutorial() {
 	lines_pipeline.destroy(rtg);
 	objects_pipeline.destroy(rtg);
 	shadow_pipeline.destroy(rtg);
+	light_grid_pipeline.destroy(rtg);
 
 	if (shadow_render_pass != VK_NULL_HANDLE) {
 		vkDestroyRenderPass(rtg.device, shadow_render_pass, nullptr);
@@ -3081,7 +3242,6 @@ void Tutorial::update(float dt) {
 	}
 
 	lines_vertices.clear();
-	float current_farclip = free_camera.far;
 	if (camera_mode == CameraMode::Scene) {
 		// the rendering happens through one of the cameras in the scene graph and the user cannot change the camera transformation
 		if (scene_camera_instances.empty()) {

@@ -1,0 +1,44 @@
+#version 450
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform writeonly image3D light_grid;
+
+// 3 channels from cloud VDB like ParkouringCloud.vdb
+layout(set = 1, binding = 0) uniform sampler3D dimensional_profile;
+layout(set = 1, binding = 1) uniform sampler3D detail_type;
+layout(set = 1, binding = 2) uniform sampler3D density_scale;
+
+// Reference: https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova
+layout(set = 2, binding = 0, std140) uniform CloudParams {
+	mat4 LOCAL_FROM_WORLD;
+	vec3 sun_direction;
+	float farclip;
+	vec3 sun_color;
+	float transmittance_limit;
+	float animate_speed;
+	int cloud_type;
+	float tiling_freq;
+	float _pad;
+} params;
+
+void main() {
+	ivec3 outCoord = ivec3(gl_GlobalInvocationID.xyz);
+	ivec3 size = imageSize(light_grid);
+    if (outCoord.x >= size.x || outCoord.y >= size.y || outCoord.z >= size.z) return; // Valid pixel coordinates are 0 to size.x - 1
+
+	vec3 world_uv = (vec3(outCoord) + vec3(0.5)) / vec3(size);
+	vec3 local_uv = clamp((params.LOCAL_FROM_WORLD * vec4(world_uv, 1.0)).xyz, 0.0, 1.0);
+
+	float profile = texture(dimensional_profile, local_uv).r;
+	float detail = texture(detail_type, local_uv).r;
+	float density = texture(density_scale, local_uv).r;
+
+	float modeled_density = max(density, 0.0) * mix(0.5, 1.0, clamp(profile, 0.0, 1.0)); //Final-TODO: double check
+	float type_factor = mix(0.75, 1.0, clamp(detail, 0.0, 1.0));
+	float sun_height = clamp(params.sun_direction.z * 0.5 + 0.5, 0.0, 1.0);
+	float height_light = mix(0.35, 1.0, world_uv.z) * mix(0.5, 1.0, sun_height);
+	vec3 light = params.sun_color * modeled_density * type_factor * height_light;
+
+	imageStore(light_grid, outCoord, vec4(light, modeled_density)); // will be used as lookup during cloud rendering, to avoid computing a secondary ray in real time
+}
