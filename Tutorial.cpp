@@ -173,6 +173,7 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	lines_pipeline.create(rtg, render_pass, 0);
 	objects_pipeline.create(rtg, render_pass, 0);
 	light_grid_pipeline.create(rtg);
+	cloud_pipeline.create(rtg);
 
 	{ // create descriptor tool:
 		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
@@ -1466,6 +1467,72 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 		}
 	}
 
+	{ // Final project: descriptor set for cloud compute NVDF channels plus detail noise.
+		if (!s72.clouds.empty()) {
+			if (cloud_textures.empty() || cloud_noise_view == VK_NULL_HANDLE) {
+				throw std::runtime_error("Cloud compute textures were not created.");
+			}
+
+			VkDescriptorPoolSize pool_size{
+				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 4, // set2_CloudTextures has 4 bindings (3 cloud NVDF + 1 noise)
+			};
+			VkDescriptorPoolCreateInfo pool_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+				.maxSets = 1,
+				.poolSizeCount = 1,
+				.pPoolSizes = &pool_size,
+			};
+			VK(vkCreateDescriptorPool(rtg.device, &pool_info, nullptr, &cloud_compute_pool));
+
+			VkDescriptorSetAllocateInfo alloc_info{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+				.descriptorPool = cloud_compute_pool,
+				.descriptorSetCount = 1,
+				.pSetLayouts = &cloud_pipeline.set2_CloudTextures,
+			};
+			VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, &cloud_compute_descriptors));
+
+			CloudTextureData const &cloud_texture = cloud_textures.front();
+			std::array<VkDescriptorImageInfo, 4> image_infos{
+				VkDescriptorImageInfo{
+					.sampler = cloud_sampler,
+					.imageView = cloud_texture.dimensional_profile.view,
+					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				},
+				VkDescriptorImageInfo{
+					.sampler = cloud_sampler,
+					.imageView = cloud_texture.detail_type.view,
+					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				},
+				VkDescriptorImageInfo{
+					.sampler = cloud_sampler,
+					.imageView = cloud_texture.density_scale.view,
+					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				},
+				VkDescriptorImageInfo{
+					.sampler = cloud_sampler,
+					.imageView = cloud_noise_view,
+					.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				},
+			};
+
+			std::array<VkWriteDescriptorSet, 4> writes{};
+			for (uint32_t i = 0; i < uint32_t(writes.size()); ++i) {
+				writes[i] = VkWriteDescriptorSet{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = cloud_compute_descriptors,
+					.dstBinding = i,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+					.pImageInfo = &image_infos[i],
+				};
+			}
+			vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
+			std::cout << "Created cloud compute NVDF+noise descriptor set." << std::endl;
+		}
+	}
+
 	{ // A2-pbr: load GGX specular prefiltered mip chain, and create image/view/descriptor
 		if (s72.env_radiance_texture != nullptr && !s72.env_radiance_texture->path.empty()) {
 			size_t dot_pos = s72.env_radiance_texture->path.rfind('.'); // rfind searches from right to left. returns pos of the last dot
@@ -1735,6 +1802,12 @@ Tutorial::~Tutorial() {
 		cloud_sampler = VK_NULL_HANDLE;
 	}
 
+	if (cloud_compute_pool != VK_NULL_HANDLE) {
+		vkDestroyDescriptorPool(rtg.device, cloud_compute_pool, nullptr);
+		cloud_compute_pool = VK_NULL_HANDLE;
+		cloud_compute_descriptors = VK_NULL_HANDLE;
+	}
+
 	if (light_grid_descriptor_pool != VK_NULL_HANDLE) {
 		vkDestroyDescriptorPool(rtg.device, light_grid_descriptor_pool, nullptr);
 		light_grid_descriptor_pool = VK_NULL_HANDLE;
@@ -1930,6 +2003,7 @@ Tutorial::~Tutorial() {
 	objects_pipeline.destroy(rtg);
 	shadow_pipeline.destroy(rtg);
 	light_grid_pipeline.destroy(rtg);
+	cloud_pipeline.destroy(rtg);
 
 	if (shadow_render_pass != VK_NULL_HANDLE) {
 		vkDestroyRenderPass(rtg.device, shadow_render_pass, nullptr);
@@ -3520,6 +3594,37 @@ void Tutorial::update(float dt) {
 			world.SUN_ENERGY.b
 		);
 		cloud_params.transmittance_limit = 0.01f;
+		if (inst.cloud != nullptr) {
+			S72::vec3 const &bmin = inst.cloud->density_scale.bbox_min;
+			S72::vec3 const &bmax = inst.cloud->density_scale.bbox_max;
+			auto local_to_world = [&](float lx, float ly, float lz) -> vec3 {
+				vec4 local = {lx, ly, lz, 1.0f};
+				vec4 world_pt = inst.WORLD_FROM_LOCAL * local;
+				return vec3{world_pt[0], world_pt[1], world_pt[2]};
+			};
+			std::array<vec3, 8> corners{
+				local_to_world(bmin.x, bmin.y, bmin.z),
+				local_to_world(bmin.x, bmin.y, bmax.z),
+				local_to_world(bmin.x, bmax.y, bmin.z),
+				local_to_world(bmin.x, bmax.y, bmax.z),
+				local_to_world(bmax.x, bmin.y, bmin.z),
+				local_to_world(bmax.x, bmin.y, bmax.z),
+				local_to_world(bmax.x, bmax.y, bmin.z),
+				local_to_world(bmax.x, bmax.y, bmax.z),
+			};
+			vec3 world_min = corners[0];
+			vec3 world_max = corners[0];
+			for (vec3 const &corner : corners) {
+				world_min[0] = std::min(world_min[0], corner[0]);
+				world_min[1] = std::min(world_min[1], corner[1]);
+				world_min[2] = std::min(world_min[2], corner[2]);
+				world_max[0] = std::max(world_max[0], corner[0]);
+				world_max[1] = std::max(world_max[1], corner[1]);
+				world_max[2] = std::max(world_max[2], corner[2]);
+			}
+			cloud_params.bbox_min = glm::vec4(world_min[0], world_min[1], world_min[2], 0.0f);
+			cloud_params.bbox_max = glm::vec4(world_max[0], world_max[1], world_max[2], 0.0f);
+		}
 		cloud_params.animate_speed = 1.0f;
 		cloud_params.cloud_type = CloudType::ParkouringCloud;
 		if (inst.cloud != nullptr

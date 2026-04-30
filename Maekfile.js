@@ -80,6 +80,11 @@ const light_grid_shaders = [
 ];
 main_objs.push( maek.CPP('Tutorial-LightGridPipeline.cpp', undefined, { depends:[...light_grid_shaders] } ) );
 
+const cloud_shaders = [
+	maek.GLSLC('cloud.comp'),
+];
+main_objs.push( maek.CPP('Tutorial-CloudPipeline.cpp', undefined, { depends:[...cloud_shaders] } ) );
+
 // -- A2-diffuse cube util --
 // Credit: adapted from Zulip discussion https://15-472-s26.zulipchat.com/#narrow/channel/570157-A2/topic/Adding.20Cube.20Utility.20to.20Maekfile/with/575174040
 const cube_objs = [

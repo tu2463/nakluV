@@ -204,6 +204,19 @@ struct Tutorial : RTG::Application {
 		void destroy(RTG &);
 	} light_grid_pipeline;
 
+	struct CloudPipeline {
+		VkPipeline handle = VK_NULL_HANDLE;
+		VkPipelineLayout layout = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set0_OutputImage = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set1_Camera = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set2_CloudTextures = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set3_Time = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set4_LightGrid = VK_NULL_HANDLE;
+		VkDescriptorSetLayout set5_Params = VK_NULL_HANDLE;
+		void create(RTG &);
+		void destroy(RTG &);
+	} cloud_pipeline;
+
 	//pools from which per-workspace things are allocated:
 	VkCommandPool command_pool = VK_NULL_HANDLE;
 	VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
@@ -284,15 +297,22 @@ struct Tutorial : RTG::Application {
 		StormbirdCloud = 1,
 	};
 
+	struct CloudTime {
+		float totalTime;
+	};
+
 	struct CloudParams { // Reference: the UIControlBufferObject struct from https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova
 		glm::mat4 LOCAL_FROM_WORLD; // cloud's VDB textures are defined in the cloud's local space
 		glm::vec3 sun_direction;
 		float farclip; // The cloud ray-marching shader needs to know how far to march along each view ray before giving up i.e. 沿视线方向最远走多远. This is bounded by the camera's far plane distance.
 		glm::vec3 sun_color;
 		float transmittance_limit; // 透射率limit；Ray marching accumulates transmittance as it steps through the cloud. T starts at 1 (fully transparent) and decreases as the cloud occludes more light. Once < 0.01, the cloud is visually opaque, so can terminate early.
+		// bounding box of the cloud's VDB textures, in world space; used for ray marching shader (cloud.comp) to determine the ray marching range - only sample if ray enters bbox
+		glm::vec4 bbox_min;
+		glm::vec4 bbox_max;
 		float animate_speed; // Final-TODO: do we need it?
 		CloudType cloud_type; // 0 = ParkouringCloud, 1 = StormbirdCloud
-		float tiling_freq; // how the noise texture tiles
+		float tiling_freq; // how the noise texture tiles; noise texture 在空间中重复的频率。freq低->稀疏，更大块
 		float _pad;
 	};
 
@@ -308,6 +328,7 @@ struct Tutorial : RTG::Application {
 		VkDescriptorSet descriptors = VK_NULL_HANDLE;
 	};
 
+	// note: same with light_grid_pipeline.set1_CloudNVDF, but since serving for different purposes, keep them separate for now. Final-TODO: find a way to refactor. 
 	VkDescriptorSetLayout cloud_descriptor_set_layout = VK_NULL_HANDLE; // bindings 0, 1, 2 = Nubis VDB float grids
 	VkDescriptorPool cloud_descriptor_pool = VK_NULL_HANDLE;
 	VkSampler cloud_sampler = VK_NULL_HANDLE;
@@ -319,6 +340,9 @@ struct Tutorial : RTG::Application {
 	// but noise data at noise_values is loaded as float (32-bit), so use R32G32B32A32_SFLOAT
 	VkFormat cloud_noise_format = VK_FORMAT_R32G32B32A32_SFLOAT;
 	CloudParams cloud_params = {};
+
+	VkDescriptorPool cloud_compute_pool = VK_NULL_HANDLE;
+	VkDescriptorSet cloud_compute_descriptors = VK_NULL_HANDLE;
 
 	Helpers::AllocatedImage light_grid_image;
 	VkImageView light_grid_view = VK_NULL_HANDLE;

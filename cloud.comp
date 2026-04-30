@@ -1,0 +1,166 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) uniform writeonly image2D cloud_output;
+
+layout(set = 1, binding = 0, std140) uniform Camera {
+	mat4 WORLD_FROM_CLIP; // precomputed inverse(proj * view) on CPU; maps NDC -> world space
+	vec4 pos;
+} camera;
+
+layout(set = 2, binding = 0) uniform sampler3D dimensional_profile;
+layout(set = 2, binding = 1) uniform sampler3D detail_type;
+layout(set = 2, binding = 2) uniform sampler3D density_scale;
+layout(set = 2, binding = 3) uniform sampler3D noise;
+
+layout(set = 3, binding = 0, std140) uniform Time {
+	float totalTime;
+} time;
+
+layout(set = 4, binding = 0) uniform sampler3D lightGrid;
+
+layout(set = 5, binding = 0, std140) uniform CloudParams {
+	mat4 LOCAL_FROM_WORLD;
+	vec3 sun_direction;
+	float farclip;
+	vec3 sun_color;
+	float transmittance_limit;
+	vec4 bbox_min;
+	vec4 bbox_max;
+	float animate_speed;
+	int cloud_type;
+	float tiling_freq;
+	float _pad;
+} params;
+
+const float STEP_SIZE = 10.0; // physical step size in world units; Final-TODO: dynamically change based on cloud scale
+const int MAX_STEPS = 512; // safety upper bound
+
+struct VoxelCloudModelingData {
+	float dimensional_profile;
+	float detail_type;
+	float density_scale;
+};
+
+VoxelCloudModelingData GetModelingData(vec3 uv) {
+	VoxelCloudModelingData modeling_data;
+	modeling_data.dimensional_profile = texture(dimensional_profile, uv).r;
+	modeling_data.detail_type = texture(detail_type, uv).r;
+	modeling_data.density_scale = texture(density_scale, uv).r;
+	return modeling_data;
+}
+
+bool IntersectAABB(vec3 ray_origin, vec3 ray_dir, vec3 bmin, vec3 bmax, out float t_enter, out float t_exit) {
+	/*
+	bounding box = 3 pairs of planes at (bmin.xyz and bmax.xyz)
+	if point within the 3 pairs of planes -> within bounding box
+	t = how far we march from the ray. P(t) = ray_origin + t * ray_dir
+	*/
+	vec3 inv_ray_dir = 1.0 / ray_dir; // multiplication is less expensive than division
+	
+	// get the entry and exit t for every plane
+	// e.g. tbot_bottom.x = when the ray.x = bmin.x, t_top.x = whe the ray.x = bmax.x
+	vec3 t_bottom = (bmin - ray_origin) * inv_ray_dir;
+	vec3 t_top = (bmax - ray_origin) * inv_ray_dir;
+	vec3 tmin = min(t_top, t_bottom);
+	vec3 tmax = max(t_top, t_bottom);
+
+	t_enter = max(max(tmin.x, tmin.y), tmin.z); // the time that the last coord of an axis axis enters bbox
+	t_exit = min(min(tmax.x, tmax.y), tmax.z); // the time that a first coord of an axis leaves bbox
+	return t_exit >= max(t_enter, 0.0);
+}
+
+vec3 RayDirection(ivec2 outCoord, ivec2 size) { // Final-TODO: double check
+	vec2 ndc = ((vec2(outCoord) + vec2(0.5)) / vec2(size)) * 2.0 - 1.0;
+	vec4 world = camera.WORLD_FROM_CLIP * vec4(ndc, 1.0, 1.0);
+	return normalize(world.xyz / world.w - camera.pos.xyz);
+}
+
+float SampleDensity(vec3 local_uv) {
+	if (any(lessThan(local_uv, vec3(0.0))) || any(greaterThan(local_uv, vec3(1.0)))) return 0.0;
+
+	VoxelCloudModelingData modeling_data = GetModelingData(local_uv);
+	// Credit: p27 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+	// noise_sample_pos = sample_pos - wind_direction * scroll_offset
+	vec3 wind_direction = vec3(0.0, 0.0, 1.0); // Final-TODO: expose as CloudParams field for control and used as params.wind_direction
+	float scroll_offset = time.totalTime * params.animate_speed * 0.01;
+	vec3 noise_sample_pos = fract(local_uv * max(params.tiling_freq, 0.001) - wind_direction * scroll_offset);
+	vec4 noise = texture(noise, noise_sample_pos);
+
+	float lf_curly_worley = noise.r;
+	float hf_curly_worley = noise.g;
+	float lf_alligator = noise.b;
+	float hf_alligator = noise.a;
+
+	// Credit: p23,24,95 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+	// "These were combined in various ways per model to create what we called noise composites for potential wispy and billowy details at the sample position."
+	float wispy_noise = mix(lf_curly_worley, hf_curly_worley, 0.5);
+	float billowy_noise = mix(lf_alligator, hf_alligator, 0.5);
+	float noise_composite = mix(wispy_noise, billowy_noise, clamp(modeling_data.detail_type, 0.0, 1.0));
+	
+	// Credit: p25 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+	// cloud_density = saturate(noise - (1.0 - dimensional_profile))
+	float cloud_density = clamp(noise_composite - (1.0 - modeling_data.dimensional_profile), 0.0, 1.0);
+	cloud_density *= modeling_data.density_scale;
+	return cloud_density;
+}
+
+void main() {
+	ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(cloud_output);
+    if (outCoord.x >= size.x || outCoord.y >= size.y) return; // Valid pixel coordinates are 0 to size.x - 1
+
+	vec3 sky = vec3(0.48, 0.62, 0.82);
+
+	vec3 ray_origin = camera.pos.xyz;
+	vec3 ray_dir = RayDirection(outCoord, size);
+
+	// populated by IntersectAABB
+	float t_enter;
+	float t_exit;
+
+	if (!IntersectAABB(ray_origin, ray_dir, params.bbox_min.xyz, params.bbox_max.xyz, t_enter, t_exit)) {
+		imageStore(cloud_output, outCoord, vec4(sky, 1.0)); // default sky blue color
+		return;
+	}
+
+	float t = max(t_enter, 0.0);
+	float t_end = min(t_exit, params.farclip);
+	float optical_depth = 0.0;
+	vec3 radiance = vec3(0.0);
+
+	/* Credit: p13 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+	For each Pixel:
+	Start a march along a ray:
+		For each step along the ray:
+			1. Sample Density
+			2. Sample Light Energy
+			3. Integrate into Pixel data
+			4. Determine step size and take the next step
+	*/
+	for (int i = 0; i < MAX_STEPS && t < t_end; ++i) {
+		vec3 world_pos = ray_origin + ray_dir * t;
+		vec3 local_uv = (params.LOCAL_FROM_WORLD * vec4(world_pos, 1.0)).xyz;
+		float density = SampleDensity(local_uv); // 1. sample density
+		if (density > 0.001) {
+			vec3 uv = clamp(local_uv, 0.0, 1.0);
+
+			/* 2. Sample Light Energy; Credit: p29 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+			Light Energy = Direct Scattering (all light energy from sun, expensive) + Ambient Scattering (all light energy from sky + neighboring clouds) + Secondary Scattering (e.g. lighting)
+			*/
+			vec3 light = texture(lightGrid, uv).rgb + params.sun_color * 0.15;
+			
+			float alpha = 1.0 - exp(-density * STEP_SIZE); // 3. Integrate into pixel data
+			float transmittance = exp(-optical_depth); // beer-lambert law; Transmittance is a measure of the amount of light at a given depth in an optical medium. Credit: p30 from https://d3d3g8mu99pzk9.cloudfront.net/AndrewSchneider/Nubis%20Cubed.pdf
+			radiance += transmittance * alpha * light; // Final-TODO: double check
+			optical_depth += density * STEP_SIZE;
+			if (transmittance < params.transmittance_limit) break; // early termination: when optical_depth is large enough, transmittance drops below limit, so the cloud is almost opaque
+		}
+		t += STEP_SIZE; // 4. Determine step size and take the next step
+	}
+
+	float alpha = clamp(1.0 - exp(-optical_depth), 0.0, 1.0);
+	vec3 color = mix(sky, radiance + sky * 0.35, alpha);
+	imageStore(cloud_output, outCoord, vec4(color, 1.0));
+}
