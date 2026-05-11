@@ -175,28 +175,62 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 	light_grid_pipeline.create(rtg);
 	cloud_pipeline.create(rtg);
 
+	{ // Final: descriptor layout and sampler used to sample the per-workspace cloud output image.
+		std::array<VkDescriptorSetLayoutBinding, 1> bindings{
+			VkDescriptorSetLayoutBinding{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+			},
+		};
+		VkDescriptorSetLayoutCreateInfo layout_info{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.bindingCount = uint32_t(bindings.size()),
+			.pBindings = bindings.data(),
+		};
+		VK(vkCreateDescriptorSetLayout(rtg.device, &layout_info, nullptr, &cloud_output_sample_descriptor_set_layout));
+
+		VkSamplerCreateInfo sampler_info{
+			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+			.magFilter = VK_FILTER_LINEAR,
+			.minFilter = VK_FILTER_LINEAR,
+			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+			.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+			.minLod = 0.0f,
+			.maxLod = 0.0f,
+		};
+		VK(vkCreateSampler(rtg.device, &sampler_info, nullptr, &cloud_output_sampler));
+	}
+
 	{ // create descriptor tool:
 		uint32_t per_workspace = uint32_t(rtg.workspaces.size()); // for easier-to-read counting
 
-		std::array< VkDescriptorPoolSize, 3 > pool_sizes{
+		std::array< VkDescriptorPoolSize, 4 > pool_sizes{
 			VkDescriptorPoolSize{ // uniform buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-				.descriptorCount = 2 * per_workspace, // 1 descriptor per set, 2 set per workspace (world, camera)
+				.descriptorCount = 5 * per_workspace, // world, camera, cloud camera, cloud time, cloud params
 			},
 			VkDescriptorPoolSize{ // storage buffer descriptors
 				.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 2 * per_workspace, // one descriptor per set, two set (Transforms + Lights) per workspace
 			},
-			VkDescriptorPoolSize{ // combined image sampler for shadow maps (set1 binding 2, one per workspace)
+			VkDescriptorPoolSize{ // combined image sampler for shadow maps and cloud output
 				.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-				.descriptorCount = 1 * per_workspace,
+				.descriptorCount = 2 * per_workspace,
+			},
+			VkDescriptorPoolSize{ // storage images for cloud output and light grid write descriptors
+				.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				.descriptorCount = 2 * per_workspace,
 			},
 		};
 
 		VkDescriptorPoolCreateInfo create_info{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.flags = 0, // because CREATE_FREE_DESCRIPTOR_SET_BIT isn't included, can't free individual descriptors allocated from this pool
-			.maxSets = 3 * per_workspace, // 3 sets per workspace (2 uniform buffer for world and camera and 1 storage buffer for transforms)
+			.maxSets = 9 * per_workspace, // original 3 sets plus 6 cloud compute sets per workspace
 			.poolSizeCount = uint32_t(pool_sizes.size()),
 			.pPoolSizes = pool_sizes.data(),
 		};
@@ -506,6 +540,8 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 				nullptr //pDescriptorCopies
 			);
 		}
+
+		create_cloud_workspace_resources(workspace);
 	}
 
 	{ //create a vertex buffer for the S72 (previously create object vertices pool buffer)
@@ -1463,6 +1499,19 @@ Tutorial::Tutorial(RTG &rtg_, S72 &s72_) : rtg(rtg_), s72(s72_) {
 			};
 			vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 
+			for (Workspace &workspace : workspaces) {
+				if (workspace.light_grid_storage_descriptors == VK_NULL_HANDLE) continue;
+				VkWriteDescriptorSet workspace_write{
+					.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+					.dstSet = workspace.light_grid_storage_descriptors,
+					.dstBinding = 0,
+					.descriptorCount = 1,
+					.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+					.pImageInfo = &storage_info,
+				};
+				vkUpdateDescriptorSets(rtg.device, 1, &workspace_write, 0, nullptr);
+			}
+
 			std::cout << "Created light grid image" << std::endl;
 		}
 	}
@@ -1928,6 +1977,9 @@ Tutorial::~Tutorial() {
 
 	for (Workspace &workspace : workspaces) {
 		// refsol::Tutorial_destructor_workspace(rtg, command_pool, &workspace.command_buffer);
+		destroy_cloud_swapchain_resources(workspace);
+		destroy_cloud_workspace_resources(workspace);
+
 		if (workspace.command_buffer != VK_NULL_HANDLE) {
 			vkFreeCommandBuffers(rtg.device, command_pool, 1, &workspace.command_buffer);
 			workspace.command_buffer = VK_NULL_HANDLE;
@@ -1996,6 +2048,15 @@ Tutorial::~Tutorial() {
 		vkDestroyDescriptorPool(rtg.device, descriptor_pool, nullptr);
 		descriptor_pool = nullptr;
 		// (this also frees the descriptor sets allocated from the pool)
+	}
+
+	if (cloud_output_sampler != VK_NULL_HANDLE) {
+		vkDestroySampler(rtg.device, cloud_output_sampler, nullptr);
+		cloud_output_sampler = VK_NULL_HANDLE;
+	}
+	if (cloud_output_sample_descriptor_set_layout != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(rtg.device, cloud_output_sample_descriptor_set_layout, nullptr);
+		cloud_output_sample_descriptor_set_layout = VK_NULL_HANDLE;
 	}
 
 	background_pipeline.destroy(rtg);
@@ -2081,6 +2142,10 @@ void Tutorial::on_swapchain(RTG &rtg_, RTG::SwapchainEvent const &swapchain) {
 
 		VK( vkCreateFramebuffer(rtg.device, &create_info, nullptr, &swapchain_framebuffers[i]) );
 	}
+
+	for (Workspace &workspace : workspaces) {
+		recreate_cloud_swapchain_resources(workspace, swapchain.extent);
+	}
 }
 
 void Tutorial::destroy_framebuffers() {
@@ -2098,6 +2163,214 @@ void Tutorial::destroy_framebuffers() {
 	swapchain_depth_image_view = VK_NULL_HANDLE;
 
 	rtg.helpers.destroy_image(std::move(swapchain_depth_image));
+}
+
+void Tutorial::create_cloud_workspace_resources(Workspace &workspace) {
+	workspace.cloud_camera_src = rtg.helpers.create_buffer(
+		sizeof(CloudCamera),
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		Helpers::Mapped
+	);
+	workspace.cloud_camera = rtg.helpers.create_buffer(
+		sizeof(CloudCamera),
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		Helpers::Unmapped
+	);
+	workspace.cloud_time_src = rtg.helpers.create_buffer(
+		sizeof(CloudTime),
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		Helpers::Mapped
+	);
+	workspace.cloud_time = rtg.helpers.create_buffer(
+		sizeof(CloudTime),
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		Helpers::Unmapped
+	);
+	workspace.cloud_params_src = rtg.helpers.create_buffer(
+		sizeof(CloudParams),
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		Helpers::Mapped
+	);
+	workspace.cloud_params = rtg.helpers.create_buffer(
+		sizeof(CloudParams),
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		Helpers::Unmapped
+	);
+
+	std::array<VkDescriptorSetLayout, 6> layouts{
+		cloud_pipeline.set0_OutputImage,
+		cloud_output_sample_descriptor_set_layout,
+		cloud_pipeline.set1_Camera,
+		cloud_pipeline.set3_Time,
+		cloud_pipeline.set5_Params,
+		light_grid_pipeline.set0_LightGridImage,
+	};
+	std::array<VkDescriptorSet, 6> sets{};
+	VkDescriptorSetAllocateInfo alloc_info{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = descriptor_pool,
+		.descriptorSetCount = uint32_t(layouts.size()),
+		.pSetLayouts = layouts.data(),
+	};
+	VK(vkAllocateDescriptorSets(rtg.device, &alloc_info, sets.data()));
+
+	workspace.cloud_output_storage_descriptors = sets[0];
+	workspace.cloud_output_sample_descriptors = sets[1];
+	workspace.cloud_camera_descriptors = sets[2];
+	workspace.cloud_time_descriptors = sets[3];
+	workspace.cloud_params_descriptors = sets[4];
+	workspace.light_grid_storage_descriptors = sets[5];
+
+	VkDescriptorBufferInfo cloud_camera_info{
+		.buffer = workspace.cloud_camera.handle,
+		.offset = 0,
+		.range = workspace.cloud_camera.size,
+	};
+	VkDescriptorBufferInfo cloud_time_info{
+		.buffer = workspace.cloud_time.handle,
+		.offset = 0,
+		.range = workspace.cloud_time.size,
+	};
+	VkDescriptorBufferInfo cloud_params_info{
+		.buffer = workspace.cloud_params.handle,
+		.offset = 0,
+		.range = workspace.cloud_params.size,
+	};
+	std::array<VkWriteDescriptorSet, 3> writes{
+		VkWriteDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = workspace.cloud_camera_descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &cloud_camera_info,
+		},
+		VkWriteDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = workspace.cloud_time_descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &cloud_time_info,
+		},
+		VkWriteDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = workspace.cloud_params_descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &cloud_params_info,
+		},
+	};
+	vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
+}
+
+void Tutorial::destroy_cloud_workspace_resources(Workspace &workspace) {
+	if (workspace.cloud_camera_src.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_camera_src));
+	}
+	if (workspace.cloud_camera.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_camera));
+	}
+	if (workspace.cloud_time_src.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_time_src));
+	}
+	if (workspace.cloud_time.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_time));
+	}
+	if (workspace.cloud_params_src.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_params_src));
+	}
+	if (workspace.cloud_params.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_buffer(std::move(workspace.cloud_params));
+	}
+
+	workspace.cloud_output_storage_descriptors = VK_NULL_HANDLE;
+	workspace.cloud_output_sample_descriptors = VK_NULL_HANDLE;
+	workspace.cloud_camera_descriptors = VK_NULL_HANDLE;
+	workspace.cloud_time_descriptors = VK_NULL_HANDLE;
+	workspace.cloud_params_descriptors = VK_NULL_HANDLE;
+	workspace.light_grid_storage_descriptors = VK_NULL_HANDLE;
+}
+
+void Tutorial::destroy_cloud_swapchain_resources(Workspace &workspace) {
+	if (workspace.cloud_output_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(rtg.device, workspace.cloud_output_view, nullptr);
+		workspace.cloud_output_view = VK_NULL_HANDLE;
+	}
+	if (workspace.cloud_output_image.handle != VK_NULL_HANDLE) {
+		rtg.helpers.destroy_image(std::move(workspace.cloud_output_image));
+	}
+}
+
+void Tutorial::recreate_cloud_swapchain_resources(Workspace &workspace, VkExtent2D extent) {
+	destroy_cloud_swapchain_resources(workspace);
+
+	workspace.cloud_output_image = rtg.helpers.create_image(
+		extent,
+		VK_FORMAT_R32G32B32A32_SFLOAT,
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		Helpers::Unmapped
+	);
+	rtg.helpers.transfer_to_image(
+		nullptr,
+		0,
+		workspace.cloud_output_image,
+		1,
+		VK_IMAGE_LAYOUT_GENERAL
+	);
+
+	VkImageViewCreateInfo view_info{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		.image = workspace.cloud_output_image.handle,
+		.viewType = VK_IMAGE_VIEW_TYPE_2D,
+		.format = workspace.cloud_output_image.format,
+		.subresourceRange{
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		},
+	};
+	VK(vkCreateImageView(rtg.device, &view_info, nullptr, &workspace.cloud_output_view));
+
+	VkDescriptorImageInfo storage_info{
+		.imageView = workspace.cloud_output_view,
+		.imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+	};
+	VkDescriptorImageInfo sample_info{
+		.sampler = cloud_output_sampler,
+		.imageView = workspace.cloud_output_view,
+		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	};
+	std::array<VkWriteDescriptorSet, 2> writes{
+		VkWriteDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = workspace.cloud_output_storage_descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+			.pImageInfo = &storage_info,
+		},
+		VkWriteDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = workspace.cloud_output_sample_descriptors,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &sample_info,
+		},
+	};
+	vkUpdateDescriptorSets(rtg.device, uint32_t(writes.size()), writes.data(), 0, nullptr);
 }
 
 

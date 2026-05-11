@@ -257,6 +257,22 @@ struct Tutorial : RTG::Application {
 		VkImageView shadow_image_view = VK_NULL_HANDLE; // 2D_ARRAY view for sampling in objects.frag (set1 binding 2)
 		std::vector<VkImageView> shadow_views; // one single-layer 2D view per shadow light (for framebuffer attachment,  A framebuffer attachment must be a single flat 2D image, not 2D_array view)
 		std::vector<VkFramebuffer> shadow_framebuffers; // one framebuffer per shadow light layer
+
+		// Final: cloud compute resources. The output image follows the swapchain size; UBO buffers persist per workspace.
+		Helpers::AllocatedImage cloud_output_image;
+		VkImageView cloud_output_view = VK_NULL_HANDLE;
+		VkDescriptorSet cloud_output_storage_descriptors = VK_NULL_HANDLE;
+		VkDescriptorSet cloud_output_sample_descriptors = VK_NULL_HANDLE;
+		VkDescriptorSet cloud_camera_descriptors = VK_NULL_HANDLE;
+		Helpers::AllocatedBuffer cloud_camera_src;
+		Helpers::AllocatedBuffer cloud_camera;
+		VkDescriptorSet cloud_time_descriptors = VK_NULL_HANDLE;
+		Helpers::AllocatedBuffer cloud_time_src;
+		Helpers::AllocatedBuffer cloud_time;
+		VkDescriptorSet cloud_params_descriptors = VK_NULL_HANDLE;
+		Helpers::AllocatedBuffer cloud_params_src;
+		Helpers::AllocatedBuffer cloud_params;
+		VkDescriptorSet light_grid_storage_descriptors = VK_NULL_HANDLE;
 	};
 	std::vector< Workspace > workspaces;
 
@@ -301,6 +317,11 @@ struct Tutorial : RTG::Application {
 		float totalTime;
 	};
 
+	struct CloudCamera {
+		glm::mat4 WORLD_FROM_CLIP;
+		glm::vec4 pos;
+	};
+
 	struct CloudParams { // Reference: the UIControlBufferObject struct from https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova
 		glm::mat4 LOCAL_FROM_WORLD; // cloud's VDB textures are defined in the cloud's local space
 		glm::vec3 sun_direction;
@@ -343,6 +364,8 @@ struct Tutorial : RTG::Application {
 
 	VkDescriptorPool cloud_compute_pool = VK_NULL_HANDLE;
 	VkDescriptorSet cloud_compute_descriptors = VK_NULL_HANDLE;
+	VkDescriptorSetLayout cloud_output_sample_descriptor_set_layout = VK_NULL_HANDLE;
+	VkSampler cloud_output_sampler = VK_NULL_HANDLE;
 
 	Helpers::AllocatedImage light_grid_image;
 	VkImageView light_grid_view = VK_NULL_HANDLE;
@@ -407,6 +430,11 @@ struct Tutorial : RTG::Application {
 	std::vector< VkFramebuffer > swapchain_framebuffers;
 	//used from on_swapchain and the destructor: (framebuffers are created in on_swapchain)
 	void destroy_framebuffers();
+	
+	void create_cloud_workspace_resources(Workspace &);
+	void destroy_cloud_workspace_resources(Workspace &);
+	void destroy_cloud_swapchain_resources(Workspace &);
+	void recreate_cloud_swapchain_resources(Workspace &, VkExtent2D);
 
 	//--------------------------------------------------------------------
 	//Resources that change when time passes or the user interacts:
